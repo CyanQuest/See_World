@@ -1,0 +1,237 @@
+{
+  "preferences": {
+    "destination": "成都",
+    "days": 3,
+    "date": "",
+    "origin": "",
+    "people": 1,
+    "budget": "",
+    "include_arrival": false,
+    "interests": [],
+    "pace": "适中",
+    "notes": "",
+    "selection": "manual",
+    "transcription": "subtitle",
+    "links": []
+  },
+  "sources": [
+    {
+      "source_id": "9d172bd7628d4b05a9d1ef989309de3e",
+      "title": "成都西门宝藏美食有哪些？欢迎补充",
+      "published": "20260827",
+      "url": "https://www.bilibili.com/video/BV14YhA6KE7d?p=1"
+    },
+    {
+      "source_id": "b24129b5a6c444208e5dc493b4e62d39",
+      "title": "送你一份超详细的成都三日旅游攻略 | 内含图文版",
+      "published": "20240404",
+      "url": "https://www.bilibili.com/video/BV1hm421J7tc?p=1"
+    },
+    {
+      "source_id": "bd5c45e89d0a4b058dbf1cbc55ac4a81",
+      "title": "成都｜一款非常适合第一次来成都的朋友的攻略视频",
+      "published": "20241208",
+      "url": "https://www.bilibili.com/video/BV1juqpYdEjn?p=1"
+    },
+    {
+      "source_id": "53ebc97c3ad847d2b7ad57796f7361b8",
+      "title": "这将是你遇到的最详细的成都旅游住宿攻略。有景点分布、有地图指引、有实地拍摄，用过的都说好！",
+      "published": "20250902",
+      "url": "https://www.bilibili.com/video/BV1tXaczUEEu?p=1"
+    },
+    {
+      "source_id": "28fdbbaf09204bfd97d0077a95bf63a5",
+      "title": "在成都，乘坐公共交通能有多少种支付方式？",
+      "published": "20230725",
+      "url": "https://www.bilibili.com/video/BV1fp4y1V781?p=1"
+    }
+  ],
+  "facts": [
+    {
+      "fact_id": "Fa29e8dd05653",
+      "category": "住宿",
+      "entity_name": "少城区域",
+      "claim": "对比春熙路更推荐少城区域，选择人民公园或通惠路地铁站附近，人更少，价格更实惠，去热门景点也方便",
+      "source_id": "b24129b5a6c444208e5dc493b4e62d39",
+      "evidence_excerpt": "除熊猫基地和三星堆博物馆外,游玩地点均在二环以内,基本上都设有地铁站。 […] 关于住宿,对比春熙路,我们更推荐西区少城这边的区域,选择人民公园或通惠路地铁站附近,人更少,价格更实惠,去热门景点也方便。"
+    },
+    {
+      "fact_id": "F4edab87b04bc",
+      "category": "交通",
+      "entity_name": "武侯祠",
+      "claim": "从太古里一带前往武侯祠距离5.1公里，打车10来元",
+      "source_id": "b24129b5a6c444208e5dc493b4e62d39",
+      "evidence_excerpt": "午餐可以在太古里一旁的东康市街解决。 […] 前往武侯祠,距离5.1公里,打车10来元。"
+    },
+    {
+      "fact_id": "F9e9580be3ede",
+      "category": "景点",
+      "entity_name": "熊猫基地",
+      "claim": "可以前往熊猫基地和憨态可掬的国宝互动",
+      "source_id": "b24129b5a6c444208e5dc493b4e62d39",
+      "evidence_excerpt": "欢迎来到成都，这是座享誉天府之国的城市。 […] 来到这里，可以前往熊猫基地和憨态可掬的国宝来一场互动，可以逛逛博物馆，领略千年前璀璨的古朴文明，还可以穿梭在大街小巷，尝尽巴蜀的百种美食。"
+    },
+    {
+      "fact_id": "Fb0df937a2e9b",
+      "category": "美食",
+      "entity_name": "桃姐园火锅",
+      "claim": "位于中海国际，被称中海最好吃的火锅，有卤味和鲜货",
+      "source_id": "9d172bd7628d4b05a9d1ef989309de3e",
+      "evidence_excerpt": "这个中海国际这边吃的还是蛮多，你看异果厨真的很好喝。 […] 中海最好吃的火锅，你也晓得这家店吗？"
+    },
+    {
+      "fact_id": "Fd2526784cfd6",
+      "category": "景点",
+      "entity_name": "天府广场",
+      "claim": "成都在天府广场，没什么好看的，就是个广场",
+      "source_id": "bd5c45e89d0a4b058dbf1cbc55ac4a81",
+      "evidence_excerpt": "Ok说完交通呢，我们就从这个画大饼一样的成都的最中间开始说起，最中间就是天府广场。 […] 天府广场没什么好看的，就是个广场旁边的成都博物馆。"
+    },
+    {
+      "fact_id": "Ff3ac65807bcb",
+      "category": "预约",
+      "entity_name": "成都博物馆",
+      "claim": "记得提前公众号预约",
+      "source_id": "b24129b5a6c444208e5dc493b4e62d39",
+      "evidence_excerpt": "这家博物馆我觉得是成都之行中的惊喜,一整栋楼都是成都博物馆,展品和布局都非常用心,馆内包含负一层,总共七层楼,每一层都是。 […] 记得提前公众号预约成都博物馆，展品内容太丰富，将会拿出来单独讲一期。"
+    },
+    {
+      "fact_id": "Fcf52eaed5d3e",
+      "category": "注意事项",
+      "entity_name": "熊猫基地",
+      "claim": "最好能在9点前入园，这个时间段熊猫刚喂完食比较活跃",
+      "source_id": "b24129b5a6c444208e5dc493b4e62d39",
+      "evidence_excerpt": "如果想把熊猫基地和三星堆博物馆都逛了，这一天才是不折不扣特种兵的一天。 […] 要看大熊猫,就得早上起早一些,门票55元,最好能在9点前入园,这个时间段熊猫刚喂完食。"
+    },
+    {
+      "fact_id": "Fa869b135d3f4",
+      "category": "费用",
+      "entity_name": "武侯祠博物馆文物区",
+      "claim": "门票50元一人",
+      "source_id": "b24129b5a6c444208e5dc493b4e62d39",
+      "evidence_excerpt": "前往武侯祠,距离5.1公里,打车10来元。 […] 武侯祠博物馆文物区门票50一人。"
+    },
+    {
+      "fact_id": "F1a626ef5eed8",
+      "category": "住宿",
+      "entity_name": "高升桥",
+      "claim": "高升桥是第二个推荐住宿位置，在武侯祠和玉林片区中间，烟火气多、商业气息不过火",
+      "source_id": "53ebc97c3ad847d2b7ad57796f7361b8",
+      "evidence_excerpt": "我推荐的第二个位置是高升桥,在武侯祠和玉林片区的中间位置。 […] 它和春熙路之间最大的区别在于,烟火气要多很多,这儿没有太过火的商业气息。"
+    },
+    {
+      "fact_id": "Fed22c144bad7",
+      "category": "交通",
+      "entity_name": "成都东站",
+      "claim": "成都东站是高铁站，坐高铁一般在成都东站下车",
+      "source_id": "bd5c45e89d0a4b058dbf1cbc55ac4a81",
+      "evidence_excerpt": "那么成都东站是高铁站，所以如果你坐高铁来，一般都是在成都东站下车。 […] 成都天府机场有高铁、地铁、大巴，所以你到的早呢可以选择高铁和地铁，到的晚呢就去坐大巴，随时都可以把你发走。"
+    },
+    {
+      "fact_id": "F13fc4774332f",
+      "category": "景点",
+      "entity_name": "天府广场",
+      "claim": "成都的市中心是天府广场，紧挨着成都博物馆和四川科技馆",
+      "source_id": "53ebc97c3ad847d2b7ad57796f7361b8",
+      "evidence_excerpt": "按照惯例,还是先看一下成都的景点分布。 […] 成都的市中心是天府广场,它紧挨着成都博物馆和四川科技馆,这俩地方都挺适合带孩子来逛的。"
+    },
+    {
+      "fact_id": "F0d376cf2372e",
+      "category": "美食",
+      "entity_name": "魁星楼街",
+      "claim": "距成都博物馆二点二公里，打车起步价，街上有冒菜、冒烤鸭、火锅等很多好吃的店",
+      "source_id": "b24129b5a6c444208e5dc493b4e62d39",
+      "evidence_excerpt": "从博物馆出来后，晚饭可以到魁星楼街解决，距离二点二公里打车起步价。 […] 这条街上很多家好吃的店，无论是冒菜、冒烤鸭。"
+    },
+    {
+      "fact_id": "F8677d23bf66b",
+      "category": "景点",
+      "entity_name": "春熙路",
+      "claim": "春熙路是自清末民国时期盛起的商业街，至今愈发繁荣",
+      "source_id": "b24129b5a6c444208e5dc493b4e62d39",
+      "evidence_excerpt": "第一站来到春熙路，这条自清末民国时期盛起的商业街，到如今愈发繁荣。 […] 别具一格的购物街，国际大牌云集，各位小富婆们可以在此开心的消费了，不消费也能逛逛凑个热闹。"
+    },
+    {
+      "fact_id": "Fb87111956e0b",
+      "category": "注意事项",
+      "entity_name": "都江堰",
+      "claim": "如果要去都江堰建议住一晚，因为景点太多，一天时间玩不过来",
+      "source_id": "53ebc97c3ad847d2b7ad57796f7361b8",
+      "evidence_excerpt": "路两边还保留了纯粹的老成都风味,大马路上基本上都是成都本地人,到了晚上,整个区域会变得非常安静,和春熙路比起来,就是两个极端,这儿的交通也很好,地铁3号线可以直达春熙路熊猫基地。 […] 那如果说你要去都江堰的话,我建议你最好是在这儿住一晚,因为这儿的景点太多,太好玩了,一天时间根本玩不过来。"
+    },
+    {
+      "fact_id": "F6dcb28b76ce7",
+      "category": "费用",
+      "entity_name": "杜甫草堂",
+      "claim": "如果不符合条件会觉得这是又小人又多、到处是文创店的公园，还要收五十块钱",
+      "source_id": "bd5c45e89d0a4b058dbf1cbc55ac4a81",
+      "evidence_excerpt": "如果你不满足这些条件，你就会觉得这是一个又小人又多，到处都是文创店，景色也就那样。 […] 然后没有任何杜甫真正用过的东西的，还要收你五十块钱的公园，尤其是对比一下旁边的。"
+    },
+    {
+      "fact_id": "F967243d20d16",
+      "category": "交通",
+      "entity_name": "地铁2号线",
+      "claim": "地铁2号线自东向西串联成都东站、天府广场、人民公园，终点站是去都江堰的必经之路",
+      "source_id": "53ebc97c3ad847d2b7ad57796f7361b8",
+      "evidence_excerpt": "首先,它的交通非常方便,地铁2号线自东向西串联起了成都东站,天府广场,人民公园,终点站西府站是去都江堰的必经之路。 […] 地铁3号线从双流机场开始,途经五侯祠,玉林片区,成都动物园,大熊猫繁育基地坐在这儿,你坐地铁就能直达成都90%的景点。"
+    },
+    {
+      "fact_id": "Fe3d427acbbf7",
+      "category": "景点",
+      "entity_name": "成都博物馆",
+      "claim": "成都博物馆在天府广场旁边，对成都发展历史感兴趣可以去看，有时有免费特展",
+      "source_id": "bd5c45e89d0a4b058dbf1cbc55ac4a81",
+      "evidence_excerpt": "天府广场没什么好看的，就是个广场旁边的成都博物馆。 […] 如果你对成都的发展历史这些感兴趣，可以去看一下，它有时候也会有很好的特展，有一些特展同样也失眠。"
+    },
+    {
+      "fact_id": "F884af186816c",
+      "category": "美食",
+      "entity_name": "魁星楼街",
+      "claim": "魁星楼街是吃饭的街，也有很多网红店；在魁星楼街和旁边的吉祥街吃饭时，可看店铺在点评网站被收录多少年，坚持不到三年的可能难吃",
+      "source_id": "bd5c45e89d0a4b058dbf1cbc55ac4a81",
+      "evidence_excerpt": "魁星楼街呢是吃饭的街，当然也有很多网红店。 […] 所以你在魁星楼街吃饭的时候，包括旁边吉祥街，也是你可以搜一下这个店铺在点评网站上面被收录了多少年。"
+    },
+    {
+      "fact_id": "Fed54d19baec1",
+      "category": "景点",
+      "entity_name": "春熙路和太古里",
+      "claim": "春熙路和太古里是成都最重要的顶流景点，旁边有大慈寺",
+      "source_id": "53ebc97c3ad847d2b7ad57796f7361b8",
+      "evidence_excerpt": "按照惯例,还是先看一下成都的景点分布。 […] 往东是成都最重要的顶流景点,春熙路和太古里,旁边还藏着一座千年古刹,大慈寺。"
+    },
+    {
+      "fact_id": "F0b415bfcaba6",
+      "category": "费用",
+      "entity_name": "杜甫草堂",
+      "claim": "门票50元一人",
+      "source_id": "b24129b5a6c444208e5dc493b4e62d39",
+      "evidence_excerpt": "杜甫草堂中闲庭漫步人民公园里晒太阳喝茶。 […] 第二天，第一站来到杜甫草堂，门票50元一人，隐秘于成都深处的庭院。"
+    },
+    {
+      "fact_id": "F143ff8aaa54b",
+      "category": "交通",
+      "entity_name": "微信、支付宝、云闪付",
+      "claim": "微信、支付宝、云闪付在成都市区主要通过小程序和乘车码乘车",
+      "source_id": "28fdbbaf09204bfd97d0077a95bf63a5",
+      "evidence_excerpt": "而微信、支付宝、云闪付这三款软件在成都市区主要还是运用小程序。 […] 在成都的郊区可以使用小程序乘车码、扫码付款以及付款码乘车。"
+    },
+    {
+      "fact_id": "Fb3ad40b2a5f0",
+      "category": "费用",
+      "entity_name": "熊猫基地",
+      "claim": "门票55元",
+      "source_id": "b24129b5a6c444208e5dc493b4e62d39",
+      "evidence_excerpt": "票价65元,市区内有四个地点可上车前往熊猫基地。 […] 要看大熊猫,就得早上起早一些,门票55元,最好能在9点前入园,这个时间段熊猫刚喂完食。"
+    }
+  ],
+  "coverage": {
+    "住宿": true,
+    "交通": true,
+    "景点": true,
+    "美食": true,
+    "预约": true,
+    "注意事项": true,
+    "费用": true
+  },
+  "omitted_count": 67
+}

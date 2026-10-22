@@ -1,0 +1,40 @@
+{
+  "origin": "Bilibili search only",
+  "candidates": 9,
+  "proposed": [
+    {
+      "title": "送你一份超详细的成都三日旅游攻略 | 内含图文版",
+      "topics": [],
+      "url": "https://www.bilibili.com/video/BV1hm421J7tc?p=1"
+    },
+    {
+      "title": "成都｜一款非常适合第一次来成都的朋友的攻略视频",
+      "topics": [],
+      "url": "https://www.bilibili.com/video/BV1juqpYdEjn?p=1"
+    },
+    {
+      "title": "成都街头必吃美食",
+      "topics": [
+        "吃"
+      ],
+      "url": "https://www.bilibili.com/video/BV1Dqt16QE5T?p=1"
+    },
+    {
+      "title": "这将是你遇到的最详细的成都旅游住宿攻略。有景点分布、有地图指引、有实地拍摄，用过的都说好！",
+      "topics": [
+        "住",
+        "玩"
+      ],
+      "url": "https://www.bilibili.com/video/BV1tXaczUEEu?p=1"
+    },
+    {
+      "title": "在成都，乘坐公共交通能有多少种支付方式？",
+      "topics": [
+        "行"
+      ],
+      "url": "https://www.bilibili.com/video/BV1fp4y1V781?p=1"
+    }
+  ],
+  "missing": [],
+  "search_warnings": []
+}
