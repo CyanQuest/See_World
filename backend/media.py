@@ -81,8 +81,13 @@ def missing_topics(sources):
     covered = set().union(*(source_topics(s) for s in sources)) if sources else set()
     return [topic for topic in TRAVEL_TOPICS if topic not in covered]
 
+# Bilibili search pacing (seconds): between requests, after a failure, cache lifetime.
+SEARCH_INTERVAL = 2
+SEARCH_COOLDOWN = 300
+SEARCH_CACHE_TTL = 21600
+
 def search(destination, interests, task_id, config):
-    terms = ['住宿 住哪里', '交通 出行攻略', '景点 游玩攻略', '美食 小吃攻略']
+    terms =['住宿 住哪里', '交通 出行攻略', '景点 游玩攻略', '美食 小吃攻略']
     terms += [x for x in interests if x not in terms][:max(0, config['search_groups']-4)]
     if config.get('evidence_queries'): terms=config['evidence_queries'][:5]
     results, seen = [], set()
@@ -92,7 +97,7 @@ def search(destination, interests, task_id, config):
         query = term if config.get('evidence_queries') else destination+' '+term
         key = hashlib.sha256(json.dumps(['wbi-v1',scope,query,config['search_count']]).encode()).hexdigest()
         with store.db() as c:
-            cached = c.execute('SELECT urls FROM search_cache WHERE cache_key=? AND created>?',(key,store.now()-21600)).fetchone()
+            cached = c.execute('SELECT urls FROM search_cache WHERE cache_key=? AND created>?',(key,store.now()-SEARCH_CACHE_TTL)).fetchone()
             pacing = c.execute('SELECT next_at FROM search_pacing WHERE scope=?',('bilibili',)).fetchone()
         if cached:
             links=json.loads(cached['urls'])
@@ -106,7 +111,7 @@ def search(destination, interests, task_id, config):
             while time.monotonic()<until:
                 check(task_id); time.sleep(min(.2,max(0,until-time.monotonic())))
             store.event(task_id, '搜索视频', f'正在搜索「{query}」')
-            with store.db() as c: c.execute('INSERT OR REPLACE INTO search_pacing VALUES(?,?)',('bilibili',store.now()+2))
+            with store.db() as c: c.execute('INSERT OR REPLACE INTO search_pacing VALUES(?,?)',('bilibili',store.now()+SEARCH_INTERVAL))
             try:
                 raw=ytdlp(['--dump-single-json','--flat-playlist',f"bilisearch{config['search_count']}:{query}"],task_id,config)
                 links=[]
@@ -121,7 +126,7 @@ def search(destination, interests, task_id, config):
             except Exception as exc:
                 from .security import safe_error
                 store.event(task_id,'搜索视频',safe_error(exc),level='warning')
-                with store.db() as c: c.execute('INSERT OR REPLACE INTO search_pacing VALUES(?,?)',('bilibili',store.now()+300))
+                with store.db() as c: c.execute('INSERT OR REPLACE INTO search_pacing VALUES(?,?)',('bilibili',store.now()+SEARCH_COOLDOWN))
                 continue
         for url in links:
             if url not in seen: seen.add(url);results.append(url)

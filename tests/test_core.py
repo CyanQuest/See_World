@@ -463,6 +463,15 @@ def test_search_rejection_cools_down_without_repeated_requests(monkeypatch,task_
     assert len(calls)==1
 
 
+def test_search_records_pacing_interval(monkeypatch,task_id):
+    monkeypatch.setattr(media,'SEARCH_INTERVAL',30)
+    monkeypatch.setattr(media,'ytdlp',lambda *a,**k:json.dumps({'entries':[{'url':URL}]}))
+    before=store.now()
+    assert media.search('成都',[],task_id,dict(Settings().model_dump(),evidence_queries=['成都 交通']))==[URL]
+    with store.db() as c: next_at=c.execute("SELECT next_at FROM search_pacing WHERE scope='bilibili'").fetchone()[0]
+    assert before+30<=next_at<=store.now()+30
+
+
 def test_bilibili_search_uses_signed_api(monkeypatch):
     from backend import bilibili_search
     monkeypatch.setattr(bilibili_search.BilibiliBaseIE,'_sign_wbi',lambda self,params,q:dict(params,w_rid='signed'))
