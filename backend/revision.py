@@ -158,12 +158,17 @@ def apply_patch(prose,result,allowed,known_facts):
     return updated
 
 
-def select_baseline(tid):
+def select_baseline(tid,c=None):
     """Compare chronological candidates under the SAME preferences and rubric."""
-    with store.db() as c: rows=c.execute('SELECT version,content,prefs FROM guides WHERE task_id=? ORDER BY version',(tid,)).fetchall()
-    current_prefs=store.task(tid)['prefs']; baseline=None; latest=None; reason='尚无已审核版本'; uncertain=False
+    if c is None:
+        with store.db() as c: return select_baseline(tid,c)
+    task=c.execute('SELECT prefs FROM tasks WHERE id=?',(tid,)).fetchone()
+    if not task: raise KeyError('任务不存在')
+    # Only the review fields are needed; full guide content is large.
+    rows=c.execute("SELECT version,prefs,json_extract(content,'$.quality_review') review,json_extract(content,'$.revision_comparison') comparison FROM guides WHERE task_id=? ORDER BY version",(tid,)).fetchall()
+    current_prefs=json.loads(task['prefs']); baseline=None; latest=None; reason='尚无已审核版本'; uncertain=False
     for row in rows:
-        content=json.loads(row['content']); review=content.get('quality_review')
+        review=json.loads(row['review']) if row['review'] else None
         if not review or json.loads(row['prefs'])!=current_prefs: continue
         latest=(row['version'],review)
         uncertain=False
@@ -171,7 +176,7 @@ def select_baseline(tid):
             baseline=latest; reason='采用当前审核规则下的起始版本'; continue
         previous=baseline[1]
         new_critical=set(review['critical_issues'])-set(previous['critical_issues'])
-        comparison=content.get('revision_comparison',{})
+        comparison=json.loads(row['comparison']) if row['comparison'] else {}
         if comparison.get('uncertain'):
             uncertain=True; reason='复审意见存在矛盾；保留基准并停止自动推进'
         elif new_critical or review['score']<previous['score'] or comparison.get('regressed'):

@@ -216,7 +216,8 @@ def test_full_mock_guide_versions_exports(monkeypatch,client,task_id):
     result=client.get(f'/api/tasks/{task_id}/guides/0').json()
     assert '人民公园' in result['markdown'] and '资料未覆盖' in result['markdown']
     assert 'S1' in result['markdown'] and URL in result['markdown']
-    assert len(result['content']['facts'])==1 and result['version']==1
+    assert set(result['content'])<={'quality_review','warnings','source_ids'} and result['version']==1
+    with store.db() as c: assert len(json.loads(c.execute('SELECT content FROM guides WHERE task_id=?',(task_id,)).fetchone()[0])['facts'])==1
     prefs=Preferences(destination='成都',days=3).model_dump()
     assert client.post(f'/api/tasks/{task_id}/regenerate',json=prefs).status_code==200
     guide.generate(task_id,cfg())
@@ -227,6 +228,18 @@ def test_full_mock_guide_versions_exports(monkeypatch,client,task_id):
     assert client.get('/api/sources/source1/transcript?format=txt').text==raw
     assert client.delete(f'/api/tasks/{task_id}').status_code==200
     with store.db() as c: assert c.execute('SELECT COUNT(*) FROM sources').fetchone()[0]==0
+
+def test_task_detail_is_read_only_and_omits_bodies(client,task_id):
+    seed(task_id)
+    detail=client.get(f'/api/tasks/{task_id}').json()
+    # The completed source counts toward the cap without being recorded by a GET.
+    assert next(r for r in detail['resources'] if r['label']=='累计视频')['used']==1
+    with store.db() as c: assert c.execute('SELECT COUNT(*) FROM source_attempts').fetchone()[0]==0
+    source=detail['sources'][0]
+    assert source['has_transcript'] is True and 'transcript' not in source and 'facts' not in source
+    assert 'description' not in source['meta'] and source['meta']['title']=='成都旅行攻略'
+    assert client.get(f'/api/tasks/{task_id}/sources').json()==detail['sources']
+    assert client.get('/api/tasks/missing/sources').status_code==404
 
 def test_all_empty_no_guide(monkeypatch,task_id):
     seed(task_id)

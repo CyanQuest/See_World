@@ -11,9 +11,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
-from . import store, media, worker
+from . import store, media, worker, quality
 from .models import Preferences, Settings
 from .providers import request as provider_request
+from .revision import select_baseline
 from .security import canonical_video, filter_cookies, safe_error
 
 CSRF = secrets.token_urlsafe(32)
@@ -129,39 +130,46 @@ def list_tasks():
     with store.db() as c: rows=c.execute('SELECT t.*, (SELECT COUNT(*) FROM sources s WHERE s.task_id=t.id AND s.transcript IS NOT NULL) source_count,(SELECT MAX(version) FROM guides g WHERE g.task_id=t.id) version FROM tasks t ORDER BY created DESC').fetchall()
     return [{**{k:r[k] for k in ('id','status','stage','created','updated','error','source_count','version')},'prefs':json.loads(r['prefs'])} for r in rows]
 
+def task_sources(c,tid):
+    # Status view: no transcript or fact bodies and no long video description.
+    rows=c.execute("SELECT id,task_id,canonical,json_remove(meta,'$.description') meta,selected,status,reason,error,complete,transcript IS NOT NULL AND transcript NOT IN ('','null','{}') has_transcript FROM sources WHERE task_id=? ORDER BY rowid",(tid,))
+    return [dict(r,meta=json.loads(r['meta']) if r['meta'] else None,has_transcript=bool(r['has_transcript'])) for r in rows]
+
 @app.get('/api/tasks/{tid}')
 def get_task(tid:str):
-    result=store.task(tid)
+    # Polled while a task runs, so it reads everything over one connection and writes nothing.
     with store.db() as c:
+        row=c.execute('SELECT * FROM tasks WHERE id=?',(tid,)).fetchone()
+        if not row: raise KeyError()
+        result=dict(row,prefs=json.loads(row['prefs']),limits=json.loads(row['limits']))
         result['events']=[dict(x) for x in c.execute('SELECT * FROM events WHERE task_id=? ORDER BY id DESC LIMIT 100',(tid,))]
         result['versions']=[dict(x) for x in c.execute('SELECT version,created,model FROM guides WHERE task_id=? ORDER BY version DESC',(tid,))]
         result['usage']=[dict(x) for x in c.execute('SELECT provider,COUNT(*) requests,SUM(seconds) seconds,SUM(tokens) tokens,SUM(cost) cost,SUM(CASE WHEN tokens IS NULL THEN 1 ELSE 0 END) unknown_tokens,SUM(CASE WHEN cost IS NULL THEN 1 ELSE 0 END) unknown_cost FROM usage WHERE task_id=? GROUP BY provider',(tid,))]
         result['chunks']=[dict(x) for x in c.execute('SELECT ch.id,ch.source_id,ch.start,ch.end,ch.status,ch.error FROM chunks ch JOIN sources s ON s.id=ch.source_id WHERE s.task_id=? ORDER BY ch.start',(tid,))]
-    from .quality import attempted
-    used=attempted(tid)
-    with store.db() as c:
+        used=quality.attempted_ids(c,tid)
         state=c.execute('SELECT * FROM quality_cycles WHERE task_id=?',(tid,)).fetchone()
         usage=c.execute('SELECT COUNT(*) n,COALESCE(SUM(seconds),0) seconds,COALESCE(SUM(COALESCE(tokens,reserved_tokens)),0) tokens FROM usage WHERE task_id=?',(tid,)).fetchone()
-    from .revision import select_baseline
-    result['version_selection']=select_baseline(tid)
-    with store.db() as c:
+        result['version_selection']=select_baseline(tid,c)
         result['evidence_searches']=[json.loads(r[0]) for r in c.execute('SELECT value FROM evidence_searches WHERE task_id=?',(tid,))]
         result['revision_issues']=[json.loads(r[0]) for r in c.execute('SELECT value FROM revision_issues WHERE task_id=? ORDER BY version',(tid,))]
+        metrics=c.execute('SELECT value FROM request_metrics WHERE task_id=?',(tid,)).fetchone()
+        result['sources']=task_sources(c,tid)
     result['quality_cycle']=dict(state) if state else None
     if state:
         for key in ('triage','history'): result['quality_cycle'][key]=json.loads(state[key])
     cfg=result['limits']
-    video_minutes=sum((s['meta'].get('actual_duration') or s['meta'].get('duration') or 0)/60 for s in store.sources(tid) if s['id'] in used)
+    video_minutes=sum((s['meta'].get('actual_duration') or s['meta'].get('duration') or 0)/60 for s in result['sources'] if s['id'] in used)
     result['resources']=[{'label':label,'used':used_value,'limit':limit,'remaining':max(0,limit-used_value)} for label,used_value,limit in [
         ('累计视频',len(used),15),('视频总时长（分钟）',round(video_minutes,1),cfg['max_minutes']),('提交音频（分钟）',round(usage['seconds']/60,1),cfg['max_audio_minutes']),('请求次数',usage['n'],cfg['max_requests']),('任务 tokens（含未知请求预留）',usage['tokens'],cfg['max_llm_tokens'])]]
-    with store.db() as c: metrics=c.execute('SELECT value FROM request_metrics WHERE task_id=?',(tid,)).fetchone()
     result['request_metrics']=json.loads(metrics[0]) if metrics else None
     result['request_limits']={'output_tokens':cfg['output_tokens'],'context_budget':cfg['context_budget']}
-    result['sources']=[{k:v for k,v in s.items() if k not in ('facts','transcript')}|{'has_transcript':bool(s['transcript'])} for s in store.sources(tid)]
     return result
 
 @app.get('/api/tasks/{tid}/sources')
-def get_sources(tid:str): return get_task(tid)['sources']
+def get_sources(tid:str):
+    with store.db() as c:
+        if not c.execute('SELECT 1 FROM tasks WHERE id=?',(tid,)).fetchone(): raise KeyError()
+        return task_sources(c,tid)
 
 class Links(BaseModel): links:list[str]=Field(min_length=1,max_length=30)
 
@@ -275,12 +283,18 @@ def revise(tid:str,req:Request):
         c.execute("UPDATE tasks SET status='queued',action='revise',error='',limits=?,updated=? WHERE id=?",(store.dumps(snapshot(store.settings())),store.now(),tid))
     return {'ok':True}
 
+# The page needs only these parts of a guide's content; the rest (writing input,
+# all facts, route) stays internal and is several hundred KB per version.
+GUIDE_FIELDS=('quality_review','warnings','source_ids')
+
 @app.get('/api/tasks/{tid}/guides/{version}')
 def get_guide(tid:str,version:int):
+    fields=','.join(f"json_extract(content,'$.{k}') {k}" for k in GUIDE_FIELDS)
     with store.db() as c:
-        row=c.execute('SELECT * FROM guides WHERE task_id=? '+('ORDER BY version DESC LIMIT 1' if version==0 else 'AND version=?'),(tid,) if version==0 else (tid,version)).fetchone()
+        row=c.execute(f'SELECT task_id,version,markdown,prefs,model,prompt_version,created,{fields} FROM guides WHERE task_id=? '+('ORDER BY version DESC LIMIT 1' if version==0 else 'AND version=?'),(tid,) if version==0 else (tid,version)).fetchone()
     if not row: raise KeyError()
-    result=dict(row); result['content']=json.loads(result['content']); result['prefs']=json.loads(result['prefs'])
+    result={k:row[k] for k in row.keys() if k not in GUIDE_FIELDS}; result['prefs']=json.loads(result['prefs'])
+    result['content']={k:json.loads(row[k]) for k in GUIDE_FIELDS if row[k] is not None}
     from .guide import public_markdown
     body,separator,appendix=result['markdown'].partition('\n## GLM 质量审核')
     result['markdown']=public_markdown(body.rstrip())

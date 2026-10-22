@@ -10,11 +10,17 @@ RUBRIC_VERSION='travel-review-v2'
 BANDS={35:((32,'优秀'),(28,'良好'),(21,'基本合格'),(14,'较弱'),(0,'不合格')),20:((18,'优秀'),(16,'良好'),(12,'基本合格'),(8,'较弱'),(0,'不合格')),15:((14,'优秀'),(12,'良好'),(9,'基本合格'),(6,'较弱'),(0,'不合格')),10:((9,'优秀'),(8,'良好'),(6,'基本合格'),(4,'较弱'),(0,'不合格'))}
 LIMIT=15
 
+# Include historical failed/partial work, not just usable transcripts.
+COUNTED="task_id=? AND (status IN ('processing','completed','partial','failed') OR transcript IS NOT NULL AND transcript NOT IN ('','null','{}'))"
+
 def attempted(tid):
     with store.db() as c:
-        # Include historical failed/partial work, not just usable transcripts.
-        c.execute("INSERT OR IGNORE INTO source_attempts SELECT id,task_id FROM sources WHERE task_id=? AND (status IN ('processing','completed','partial','failed') OR transcript IS NOT NULL AND transcript NOT IN ('','null','{}'))",(tid,))
+        c.execute('INSERT OR IGNORE INTO source_attempts SELECT id,task_id FROM sources WHERE '+COUNTED,(tid,))
         return {r[0] for r in c.execute('SELECT source_id FROM source_attempts WHERE task_id=?',(tid,))}
+
+def attempted_ids(c,tid):
+    """Same set as attempted() without recording it, for read-only status pages."""
+    return {r[0] for r in c.execute('SELECT source_id FROM source_attempts WHERE task_id=? UNION SELECT id FROM sources WHERE '+COUNTED,(tid,tid))}
 
 def reserve(tid,sid):
     attempted(tid)
