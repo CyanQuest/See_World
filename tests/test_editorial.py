@@ -113,6 +113,25 @@ def test_no_improvement_prevents_more_rewrites(monkeypatch,task_id):
     assert store.task(task_id)['status']=='completed_with_warnings'
 
 
+@pytest.mark.parametrize('later',[[],[{'improved':False,'next_phase':'expand'}]])
+def test_reclassifying_a_version_keeps_its_first_improvement_decision(monkeypatch,task_id,later):
+    # Version 1 (70) was already classified as an improvement, which stored 70 as
+    # baseline_score. Resuming (or a later wrong entry) must not compare it with itself.
+    saved(task_id)
+    first={'version':1,'round':1,'score':70,'improved':True,'next_phase':'revise'}
+    history=[first]+[dict(first,**entry) for entry in later]
+    with store.db() as c: c.execute('UPDATE quality_cycles SET revision_round=1,baseline_score=70,history=? WHERE task_id=?',(store.dumps(history),task_id))
+    monkeypatch.setattr(editorial,'triage',lambda *a:{'rules_version':'phase2-v1','search_complete':True,'repairable':['仍需重排'],'evidence_gaps':[],'queries':[]})
+    calls=[]
+    def revise(tid,config,quality_pending=False,revision=None):
+        calls.append(revision)
+        with store.db() as c: c.execute("UPDATE quality_cycles SET phase='done' WHERE task_id=?",(tid,))
+    monkeypatch.setattr(guide,'generate',revise)
+    quality.run(task_id,Settings().model_dump())
+    assert calls==[1]
+    with store.db() as c: assert json.loads(c.execute('SELECT history FROM quality_cycles WHERE task_id=?',(task_id,)).fetchone()[0])[-1]['improved'] is True
+
+
 def test_request_metrics_show_block_before_payment(task_id):
     from backend import providers
     with pytest.raises(InvalidOutput,match='上下文'):
@@ -166,3 +185,31 @@ def test_every_model_stage_has_output_limit():
     used|=set(re.findall(r"llm_json\([^\n]*,'([^']+)'\)",source))
     # Every stage named in code has a cap, and the table has no unused names.
     assert used==set(providers.OUTPUT_LIMITS)
+
+
+def test_classification_ignores_stop_reason_for_checkpoints_and_model_input(monkeypatch,task_id):
+    from backend import revision
+    saved(task_id)
+    text='成都人民公园可以喝茶，早上去散步。'
+    with store.db() as c: c.execute("INSERT INTO sources(id,task_id,canonical,meta,selected,status,complete,transcript) VALUES('s1',?,'u',?,1,'completed',1,?)",(task_id,store.dumps({'title':'成都'}),store.dumps({'text':text,'hash':'h','segments':[]})))
+    def set_stop_reason(value):
+        with store.db() as c:
+            content=json.loads(c.execute('SELECT content FROM guides WHERE task_id=? AND version=1',(task_id,)).fetchone()[0])
+            content['quality_review'].pop('stop_reason',None)
+            if value: content['quality_review']['stop_reason']=value
+            c.execute('UPDATE guides SET content=? WHERE task_id=? AND version=1',(store.dumps(content),task_id))
+    calls=[]
+    def llm(cfg,tid,instruction,data,stage):
+        calls.append((stage,data))
+        if stage=='问题范围': return {'issues':[{'description':'重排公园活动','kind':'text','targets':['overview'],'days':[],'basis':'审核原句','action':'改写','impact':'概览','terms':['公园']}]}
+        return {'status':'partial','hit_ids':[data['candidates'][0]['hit_id']],'conclusion':'可支持','limitations':'','unresolved':'时间'}
+    monkeypatch.setattr(editorial,'llm_json',llm)
+    set_stop_reason('第一次停止')
+    first=revision.classify(task_id,1,Settings().model_dump())
+    assert [stage for stage,_ in calls]==['问题范围','证据判断']
+    assert 'stop_reason' not in calls[0][1]['review'] and '第一次停止' not in json.dumps(calls,ensure_ascii=False)
+    # A cycle stopping again (new reason) or a review without one reuses every checkpoint.
+    for value in ('第二次停止',None):
+        set_stop_reason(value)
+        assert revision.classify(task_id,1,Settings().model_dump())['repairable']==first['repairable']
+    assert len(calls)==2

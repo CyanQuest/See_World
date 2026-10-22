@@ -147,7 +147,12 @@ def run(tid,config):
             baseline=selection['baseline_version'] or state['version']
             decision=editorial.triage(tid,baseline,config)
             feedback=json.loads(state['feedback'])
-            improved=state['baseline_score']<0 or feedback['score']>state['baseline_score']
+            history=json.loads(state['history'])
+            # Classifying a version stores its score as baseline_score, so a resumed or
+            # requested re-classification would compare the version with itself. Its
+            # first decision was made against the previous version; keep that one.
+            first=next((h for h in history if h['version']==state['version'] and h['round']==state['revision_round']),None)
+            improved=first['improved'] if first else state['baseline_score']<0 or feedback['score']>state['baseline_score']
             with store.db() as c: current_content=json.loads(c.execute('SELECT content FROM guides WHERE task_id=? AND version=?',(tid,state['version'])).fetchone()[0])
             improved=improved or bool(current_content.get('revision_comparison',{}).get('resolved'))
             if baseline!=state['version']: improved=True
@@ -155,7 +160,6 @@ def run(tid,config):
             next_phase='revise' if can_revise else 'expand'
             decision['baseline_version']=baseline
             decision['baseline_reason']=selection['baseline_reason']
-            history=json.loads(state['history'])
             with store.db() as c: version_content=json.loads(c.execute('SELECT content FROM guides WHERE task_id=? AND version=?',(tid,state['version'])).fetchone()[0])
             history.append({'changed_sections':version_content.get('revision_changes',[]),'version':state['version'],'round':state['revision_round'],'score':feedback['score'],'improved':improved,**decision,'next_phase':next_phase})
             with store.db() as c:

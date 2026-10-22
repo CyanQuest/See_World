@@ -111,7 +111,10 @@ def search_existing(tid,issue,config,rows=None):
 def classify(tid,version,config):
     with store.db() as c: content=json.loads(c.execute('SELECT content FROM guides WHERE task_id=? AND version=?',(tid,version)).fetchone()[0])
     known=blocks(content['writing']); prefs=store.task(tid)['prefs']
-    key=digest([RULES,version,content['quality_review'],prefs,known])
+    # stop_reason is the program's note written when a cycle stops, not review content;
+    # keeping it would change this checkpoint key every time a stopped cycle resumes.
+    review={k:v for k,v in content['quality_review'].items() if k!='stop_reason'}
+    key=digest([RULES,version,review,prefs,known])
     def validate(value):
         for issue in value['issues']:
             if issue['kind'] not in ('text','day','cross_day','global') or not issue['targets'] or not set(issue['targets'])<=known.keys(): raise InvalidOutput('问题修改目标越界')
@@ -119,7 +122,7 @@ def classify(tid,version,config):
             if issue['kind']!='text' and not issue['days']: raise InvalidOutput('路线问题必须说明受影响日期')
             if not issue['basis'] or not issue['action'] or not issue['impact']: raise InvalidOutput('问题缺少依据、动作或影响范围')
         return value
-    issues=editorial.structured(tid,'问题范围:'+key,Issues,'将审核必须修改项整理成问题，不纳入无需修改项。targets只用输入段落编号；文字text仅改目标段落，单日路线day，住宿或跨日移动cross_day须覆盖次日，全局硬需求冲突才global且说明理由。days列受影响日期，terms给地点、别名、起终点、类别关键词。basis引用具体审核原句；审核不是事实，include_arrival只管预算是否含往返费用，预算完整性不扣分。',{'blocks':known,'review':content['quality_review'],'preferences':prefs},config,validate)['issues']
+    issues=editorial.structured(tid,'问题范围:'+key,Issues,'将审核必须修改项整理成问题，不纳入无需修改项。targets只用输入段落编号；文字text仅改目标段落，单日路线day，住宿或跨日移动cross_day须覆盖次日，全局硬需求冲突才global且说明理由。days列受影响日期，terms给地点、别名、起终点、类别关键词。basis引用具体审核原句；审核不是事实，include_arrival只管预算是否含往返费用，预算完整性不扣分。',{'blocks':known,'review':review,'preferences':prefs},config,validate)['issues']
     rows=corpus(tid); records=[]
     for issue in issues:
         issue['issue_id']='I'+digest([version,issue])[:16]
