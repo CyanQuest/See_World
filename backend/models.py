@@ -1,6 +1,10 @@
 from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+# Videos processed per batch, and in total per task (failed attempts count).
+BATCH_VIDEOS = 5
+TASK_VIDEOS = 15
+
 class Preferences(BaseModel):
     destination: str = Field(min_length=1, max_length=100)
     days: int = Field(3, ge=1, le=30)

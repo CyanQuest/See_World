@@ -7,12 +7,12 @@ import httpx
 import pytest
 from backend import store,media,guide,providers,worker
 from backend.models import Preferences,Settings
-from backend.security import canonical_video,parse_qs,filter_cookies,public_url,Attention,InvalidOutput
+from backend.security import canonical_video,filter_cookies,public_url,Attention,InvalidOutput,UnknownOutcome
 
 URL='https://www.bilibili.com/video/BV1xx411c7mD?p=2'
 
 def authored_result(plan, facts):
-    from backend.writing import EMPTY, HEADINGS
+    from backend.writing import HEADINGS
     byid={f['fact_id']:f for f in facts}
     block=lambda ids:{'text':byid[ids[0]]['claim'] if ids else '建议在住宿处休息，疲劳时取消可选活动。','fact_ids':ids,'kind':'fact' if ids else 'planning'}
     plan['writing']={'overview':block([facts[0]['fact_id']]),'days':[{'day':d['day'],**{p:dict(block(d[p]),route_node_ids=[f"D{d['day']}-start"]) for p in ('上午','下午','晚上')}} for d in plan['days']], 'sections':{h:[] for h in HEADINGS}}
@@ -770,3 +770,25 @@ def test_completed_writing_checkpoint_survives_before_version_commit(monkeypatch
     monkeypatch.setattr(guide,'check',lambda *a:None)
     guide.generate(task_id,dict(cfg(),output_tokens=7000))
     assert calls==['extract','write']
+
+
+@pytest.mark.parametrize('error,status',[(UnknownOutcome('网关超时'),'unknown'),(Attention('结果未知的普通提醒'),'failed')])
+def test_chunk_status_follows_error_type_not_wording(monkeypatch,client,task_id,error,status):
+    source=seed(task_id)
+    chunk={'id':'c1','source_id':source['id'],'start':0,'end':60,'status':'pending','path':'unused.mp3'}
+    with store.db() as c: c.execute('INSERT INTO chunks(id,source_id,start,end,status,path) VALUES(?,?,?,?,?,?)',('c1',source['id'],0,60,'pending','unused.mp3'))
+    def fail(*a,**k): raise error
+    monkeypatch.setattr(worker,'request',fail)
+    with pytest.raises(Attention): worker.transcribe_chunk(chunk,task_id,cfg(),threading.Event())
+    with store.db() as c: assert c.execute("SELECT status FROM chunks WHERE id='c1'").fetchone()[0]==status
+    assert client.get(f'/api/tasks/{task_id}').json()['unknown_requests']==0
+    with store.db() as c: c.execute("INSERT INTO usage(id,task_id,provider,operation,status,created) VALUES('u1',?,'moss','音频分片转写','unknown',0)",(task_id,))
+    assert client.get(f'/api/tasks/{task_id}').json()['unknown_requests']==1
+
+
+def test_frontend_setting_limits_match_model():
+    import runpy
+    root=Path(__file__).resolve().parent.parent
+    render=runpy.run_path(str(root/'scripts/gen_settings_limits.py'))['render']
+    # Regenerate with: .venv/bin/python scripts/gen_settings_limits.py
+    assert (root/'frontend/src/settingsLimits.json').read_text()==render()

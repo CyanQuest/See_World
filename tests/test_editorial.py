@@ -3,7 +3,7 @@ import hashlib
 import pytest
 from backend import store, quality, editorial, guide, writing, media, worker
 from backend.models import Settings
-from backend.security import InvalidOutput, Attention
+from backend.security import InvalidOutput
 
 
 def saved(tid, score=70):

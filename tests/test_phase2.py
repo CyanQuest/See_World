@@ -1,7 +1,6 @@
-import copy
 import json
 import pytest
-from backend import editorial, revision, writing, store, quality
+from backend import editorial, revision, writing, store
 from backend.models import Settings
 from backend.security import InvalidOutput, Attention
 

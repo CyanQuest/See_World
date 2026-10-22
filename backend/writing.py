@@ -3,6 +3,7 @@ import json
 import re
 from decimal import Decimal
 from pathlib import Path
+from . import revision
 from .security import InvalidOutput
 
 PROMPT_PATH = Path(__file__).resolve().parent.parent/'prompts/glm_travel_writer.md'
@@ -176,9 +177,8 @@ def clean_prose(prose):
 
 
 def validate_route_links(prose,route,required_targets=None):
-    from .revision import blocks
     byday={d['day']:d for d in route['days']}
-    for target,block in blocks(prose).items():
+    for target,block in revision.blocks(prose).items():
         if not target.startswith('day:') or required_targets is not None and target not in required_targets: continue
         day=byday.get(int(target.split(':')[1]))
         if day is None: raise InvalidOutput('正文日期不在已检查路线')

@@ -7,6 +7,9 @@ from . import store
 from .providers import llm_json
 from .security import InvalidOutput
 
+# Part of saved checkpoint keys: changing it re-runs completed paid stages.
+RULES = 'phase2-v1'
+
 class Strict(BaseModel):
     model_config = ConfigDict(strict=True, extra='forbid')
 
@@ -90,7 +93,7 @@ def checked(model, result):
 
 def cached_step(tid, key, instruction, data, config, validator):
     """Successful stages survive settings changes and process restarts."""
-    key=key+':'+hashlib.sha256(store.dumps({'rules':'phase2-v1','instruction':instruction,'data':data,'model':config.get('llm_model')}).encode()).hexdigest()
+    key=key+':'+hashlib.sha256(store.dumps({'rules':RULES,'instruction':instruction,'data':data,'model':config.get('llm_model')}).encode()).hexdigest()
     with store.db() as c:
         row=c.execute('SELECT value FROM editorial_steps WHERE task_id=? AND step_key=?',(tid,key)).fetchone()
     if row: return validator(json.loads(row[0]))
@@ -115,7 +118,7 @@ def structured(tid,key,model,instruction,data,config,extra=lambda x:x):
 
 
 def route(tid, packet, config, context=None):
-    seed=hashlib.sha256(store.dumps({'rules':'phase2-v1','packet':packet,'context':context}).encode()).hexdigest()
+    seed=hashlib.sha256(store.dumps({'rules':RULES,'packet':packet,'context':context}).encode()).hexdigest()
     known={f['fact_id'] for f in packet['facts']}
     def directory_check(r):
         ids=set()
@@ -125,7 +128,7 @@ def route(tid, packet, config, context=None):
                 p['confirmed']=False  # Conservatively demote conflicts; never invent a location.
             ids.add(p['place_id'])
         return r
-    directory_seed=hashlib.sha256(store.dumps({'rules':'phase2-v1','facts':packet['facts'],'sources':packet['sources'] if 'sources' in packet else []}).encode()).hexdigest()
+    directory_seed=hashlib.sha256(store.dumps({'rules':RULES,'facts':packet['facts'],'sources':packet['sources'] if 'sources' in packet else []}).encode()).hexdigest()
     directory=(context or {}).get('previous_directory') or structured(tid,'地点整理:'+directory_seed,Directory,'按原文建立地点目录，保留标准名、别名、所属城市或片区、类别及支持这些属性的事实编号。不能从视频标题推定归属。没有原文归属依据就 confirmed=false。同名不同区域不得合并，大范围目的地区分城市。只收录实际地点。',packet,config,directory_check)
     places={p['place_id']:p for p in directory['places']}
     def route_check(r):
@@ -155,7 +158,7 @@ def route(tid, packet, config, context=None):
     for attempt in range(3):
         gate=structured(tid,f'路线检查{attempt}:'+seed,Gate,'独立核对路线与原文。检查归属证据、跨区折返、换住收益、交通、活动强度、时间窗口和十月等日期条件。明确不可行或无证据的核心移动应 valid=false。缩小范围并有可执行条件方案可以成立，不强求景点数；不能通过空白行程掩盖用户需求。issues 只列必须在成文前修改的问题，存在此类问题必须 valid=false；非阻塞的缺证据写 evidence_gaps。预算缺失本身不构成否决。',{'evidence':packet,'directory':directory,'route':draft},config)
         if gate['valid'] and not gate['issues']:
-            return {'directory':directory,'route':draft,'route_check':gate,'route_version':hashlib.sha256(store.dumps(draft).encode()).hexdigest(),'rules_version':'phase2-v1'}
+            return {'directory':directory,'route':draft,'route_check':gate,'route_version':hashlib.sha256(store.dumps(draft).encode()).hexdigest(),'rules_version':RULES}
         if attempt==2: raise InvalidOutput('路线检查仍未通过：'+'；'.join(gate['issues'])+'。草案和证据已保存，可调整设置后继续。')
         draft=structured(tid,f'路线调整{attempt+1}:'+seed,Route,instruction+'\n根据检查意见调整不成立的路线，再输出完整草案。',dict(data,route=draft,route_check=gate),config,route_check)
 
@@ -210,5 +213,5 @@ def validate_route(route, directory, packet):
 
 
 def triage(tid, version, config):
-    from .revision import classify
+    from .revision import classify  # revision imports this module
     return classify(tid,version,config)

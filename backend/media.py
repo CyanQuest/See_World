@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -11,7 +12,8 @@ import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from . import store
-from .security import Attention, Cancelled, canonical_video, filter_cookies, get_public, public_url
+from .models import BATCH_VIDEOS
+from .security import Attention, Cancelled, canonical_video, filter_cookies, get_public, public_url, safe_error
 
 def check(task_id):
     if task_id and store.task(task_id)['status'] == 'cancelled': raise Cancelled()
@@ -29,7 +31,6 @@ def run(args, task_id=None, timeout=300, allow_failure=False):
                 time.sleep(.2)
         finally:
             if proc.poll() is None:
-                import signal
                 os.killpg(proc.pid, signal.SIGTERM)
                 try: proc.wait(timeout=3)
                 except subprocess.TimeoutExpired: os.killpg(proc.pid, signal.SIGKILL); proc.wait()
@@ -124,7 +125,6 @@ def search(destination, interests, task_id, config):
                     with store.db() as c: c.execute('INSERT OR REPLACE INTO search_cache VALUES(?,?,?)',(key,store.dumps(links),store.now()))
             except Cancelled: raise
             except Exception as exc:
-                from .security import safe_error
                 store.event(task_id,'搜索视频',safe_error(exc),level='warning')
                 with store.db() as c: c.execute('INSERT OR REPLACE INTO search_pacing VALUES(?,?)',('bilibili',store.now()+SEARCH_COOLDOWN))
                 continue
@@ -155,7 +155,7 @@ def choose(candidates, destination, config):
         if destination.lower() not in (m['title'] + m.get('description', '')).lower(): reason = '目的地未明确匹配，可手动确认'
         elif not duration: reason = '时长未知，无法校验资源限制'
         elif duration > config['max_video_minutes'] * 60: reason = '超过单条时长上限'
-        elif len(selected) >= min(5, config['max_videos']): reason = '达到视频数量上限'
+        elif len(selected) >= min(BATCH_VIDEOS, config['max_videos']): reason = '达到视频数量上限'
         elif total + duration > config['max_minutes'] * 60: reason = '超过总时长上限'
         else:
             selected.append(item['id']); total += duration; authors.add(m['author']); reason = '主题候选：'+('、'.join(t for t in TRAVEL_TOPICS if t in source_topics(item)) or '综合/未明确')+'；优先补齐住、行、玩、吃，内容待原文验证'

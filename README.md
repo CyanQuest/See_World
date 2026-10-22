@@ -2,7 +2,7 @@
 
 个人使用的中文本机 Web 应用。输入目的地，搜索 Bilibili 旅行视频，优先提取字幕；需要时下载音频并调用 `moss-transcribe-1.0`，再通过你配置的攻略模型整理有来源依据的行程。
 
-**当前交付：可运行的本机应用，已完成一次真实目的地到攻略全流程。** 成都任务从 19 条候选中确认 5 个视频，完成 Moss 转写、GLM 整理、原文抽查与 Markdown 导出；当前 134 项本地和模拟测试通过。真实示例以美食为主，仍有转写歧义和资料缺口，不能视为已通过全部 V1.0 真实验收。详见 [验收记录](docs/验收记录.md)、[真实联调记录](docs/真实联调记录.md) 和 [真实生成示例](docs/成都_真实生成示例.md)。
+**当前交付：可运行的本机应用，已完成一次真实目的地到攻略全流程。** 成都任务从 19 条候选中确认 5 个视频，完成 Moss 转写、GLM 整理、原文抽查与 Markdown 导出；当前 138 项本地和模拟测试通过。真实示例以美食为主，仍有转写歧义和资料缺口，不能视为已通过全部 V1.0 真实验收。详见 [验收记录](docs/验收记录.md)、[真实联调记录](docs/真实联调记录.md) 和 [真实生成示例](docs/成都_真实生成示例.md)。
 
 ## 打开应用
 
@@ -126,9 +126,10 @@ Cookie 导入只保留 Bilibili 域。临时 Cookie 文件权限 0600，用完�
 ## 测试、更新与排错
 
 ```sh
-.venv/bin/python -m pytest -q
-cd frontend && npm run build
+make check
 ```
+
+依次运行 ruff 正确性检查、全部测试、前端格式检查和带类型检查的构建。前端格式化用 `cd frontend && npm run format`。修改 `backend/models.py` 中设置的数值范围后，运行 `.venv/bin/python scripts/gen_settings_limits.py` 重新生成前端校验范围，否则测试会失败。
 
 只读真实搜索诊断（不下载视频、不调用付费 API）：
 
@@ -155,6 +156,8 @@ cd frontend && npm run build
 - `backend/ytdlp_guard.py`：yt-dlp 的请求/重定向域名和公网地址校验。
 - `backend/providers.py`：Moss/攻略模型协议、重试、使用量与请求缓存。
 - `backend/guide.py`：分段事实、来源检查、行程编排与导出内容。
-- `frontend/src/`：React + TypeScript 中文界面。
+- `backend/editorial.py`、`backend/revision.py`、`backend/quality.py`、`backend/writing.py`：路线与正文检查、按问题修订、GLM 审核循环和正文校验。
+- `backend/models.py`：偏好与设置模型，以及每批 / 累计视频数上限。
+- `frontend/src/main.tsx`：应用状态与页面流程；`TaskPanels.tsx`、`SettingsPage.tsx`、`components.tsx` 为界面组件，`api.ts`、`types.ts`、`constants.ts` 为请求、类型与常量。
 
 需求参考：用户提供的《旅行攻略生成软件_需求文档_V1.0.md》。第三方接口依据 [Moss 官方转写文档](https://platform.mosi.cn/docs/reference/transcriptions/) 与 [yt-dlp 官方 Bilibili 提取器](https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/extractor/bilibili.py)。

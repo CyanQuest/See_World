@@ -1,0 +1,6 @@
+# Correctness checks only (syntax errors, undefined or unused names); the
+# project's compact style is intentional, so style rules are not enabled.
+target-version = "py311"
+
+[lint]
+select = ["E9", "F"]

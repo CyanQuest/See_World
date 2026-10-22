@@ -8,7 +8,7 @@ from . import store, editorial
 from .providers import OUTPUT_LIMITS
 from .security import InvalidOutput
 
-RULES='phase2-v1'
+RULES=editorial.RULES
 PERIODS=('上午','下午','晚上')
 
 def digest(value):

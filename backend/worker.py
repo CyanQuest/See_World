@@ -1,16 +1,12 @@
 import concurrent.futures
 import fcntl
 import hashlib
-import json
-import os
 import shutil
 import threading
-import time
-from pathlib import Path
 from . import store, media
-from .guide import generate
+from .models import BATCH_VIDEOS
 from .providers import request
-from .security import Attention, DeferredRetry, Cancelled, safe_error
+from .security import Attention, DeferredRetry, Cancelled, UnknownOutcome, safe_error
 
 ACTIVE = ('queued','searching','processing','generating')
 
@@ -29,7 +25,7 @@ def transcribe_chunk(chunk, task_id, config, stop):
     if chunk['status']=='completed': return
     if stop.is_set(): return
     media.check(task_id)
-    if chunk['status'] in ('submitting','unknown'): raise Attention('有分片请求结果未知，重试可能重复计费；请先检查服务记录')
+    if chunk['status'] in ('submitting','unknown'): raise UnknownOutcome('有分片请求结果未知，重试可能重复计费；请先检查服务记录')
     with store.db() as c: c.execute("UPDATE chunks SET status='submitting',error='' WHERE id=?",(chunk['id'],))
     try:
         result=request(config,task_id,'moss','音频分片转写',audio=chunk['path'],seconds=chunk['end']-chunk['start'])
@@ -41,8 +37,7 @@ def transcribe_chunk(chunk, task_id, config, stop):
         with store.db() as c: c.execute("UPDATE chunks SET status='unknown',error='任务取消，外部请求可能仍在处理' WHERE id=? AND status='submitting'",(chunk['id'],))
         stop.set(); raise
     except Attention as exc:
-        unknown='未知' in str(exc) or '计费' in str(exc)
-        with store.db() as c: c.execute('UPDATE chunks SET status=?,error=? WHERE id=?',('unknown' if unknown else 'failed',safe_error(exc),chunk['id']))
+        with store.db() as c: c.execute('UPDATE chunks SET status=?,error=? WHERE id=?',('unknown' if isinstance(exc,UnknownOutcome) else 'failed',safe_error(exc),chunk['id']))
         stop.set(); raise
     except Exception as exc:
         with store.db() as c: c.execute("UPDATE chunks SET status='failed',error=? WHERE id=?",(safe_error(exc),chunk['id']))
@@ -89,7 +84,7 @@ def process_source(source, task_id, config, prefs):
 
 def execute(task_id, config):
     task=store.task(task_id); prefs=task['prefs']
-    from . import quality
+    from . import quality  # quality imports this module
     with store.db() as c: cycle=c.execute('SELECT 1 FROM quality_cycles WHERE task_id=?',(task_id,)).fetchone()
     if cycle or task['action']=='regenerate': quality.run(task_id,config); return
     current=store.sources(task_id)
@@ -111,7 +106,7 @@ def execute(task_id, config):
             selected=[]; total=0
             for s in current:
                 d=s['meta'].get('duration') or 0
-                if 0<d<=config['max_video_minutes']*60 and total+d<=config['max_minutes']*60 and len(selected)<min(5,config['max_videos']):
+                if 0<d<=config['max_video_minutes']*60 and total+d<=config['max_minutes']*60 and len(selected)<min(BATCH_VIDEOS,config['max_videos']):
                     selected.append(s['id']); total+=d; reasons[s['id']]='用户提供的视频链接'
         for s in current: store.update_source(s['id'],selected=int(s['id'] in selected),reason=reasons[s['id']])
         missing = media.missing_topics([s for s in current if s['id'] in selected])

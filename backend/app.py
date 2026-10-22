@@ -1,5 +1,4 @@
 import json
-import os
 import secrets
 import shutil
 import sys
@@ -12,7 +11,8 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 from . import store, media, worker, quality
-from .models import Preferences, Settings
+from .guide import public_markdown
+from .models import BATCH_VIDEOS, TASK_VIDEOS, Preferences, Settings
 from .providers import request as provider_request
 from .revision import select_baseline
 from .security import canonical_video, filter_cookies, safe_error
@@ -148,7 +148,7 @@ def get_task(tid:str):
         result['chunks']=[dict(x) for x in c.execute('SELECT ch.id,ch.source_id,ch.start,ch.end,ch.status,ch.error FROM chunks ch JOIN sources s ON s.id=ch.source_id WHERE s.task_id=? ORDER BY ch.start',(tid,))]
         used=quality.attempted_ids(c,tid)
         state=c.execute('SELECT * FROM quality_cycles WHERE task_id=?',(tid,)).fetchone()
-        usage=c.execute('SELECT COUNT(*) n,COALESCE(SUM(seconds),0) seconds,COALESCE(SUM(COALESCE(tokens,reserved_tokens)),0) tokens FROM usage WHERE task_id=?',(tid,)).fetchone()
+        usage=c.execute("SELECT COUNT(*) n,COALESCE(SUM(seconds),0) seconds,COALESCE(SUM(COALESCE(tokens,reserved_tokens)),0) tokens,COALESCE(SUM(status='unknown'),0) unknown FROM usage WHERE task_id=?",(tid,)).fetchone()
         result['version_selection']=select_baseline(tid,c)
         result['evidence_searches']=[json.loads(r[0]) for r in c.execute('SELECT value FROM evidence_searches WHERE task_id=?',(tid,))]
         result['revision_issues']=[json.loads(r[0]) for r in c.execute('SELECT value FROM revision_issues WHERE task_id=? ORDER BY version',(tid,))]
@@ -160,8 +160,10 @@ def get_task(tid:str):
     cfg=result['limits']
     video_minutes=sum((s['meta'].get('actual_duration') or s['meta'].get('duration') or 0)/60 for s in result['sources'] if s['id'] in used)
     result['resources']=[{'label':label,'used':used_value,'limit':limit,'remaining':max(0,limit-used_value)} for label,used_value,limit in [
-        ('累计视频',len(used),15),('视频总时长（分钟）',round(video_minutes,1),cfg['max_minutes']),('提交音频（分钟）',round(usage['seconds']/60,1),cfg['max_audio_minutes']),('请求次数',usage['n'],cfg['max_requests']),('任务 tokens（含未知请求预留）',usage['tokens'],cfg['max_llm_tokens'])]]
+        ('累计视频',len(used),TASK_VIDEOS),('视频总时长（分钟）',round(video_minutes,1),cfg['max_minutes']),('提交音频（分钟）',round(usage['seconds']/60,1),cfg['max_audio_minutes']),('请求次数',usage['n'],cfg['max_requests']),('任务 tokens（含未知请求预留）',usage['tokens'],cfg['max_llm_tokens'])]]
     result['request_metrics']=json.loads(metrics[0]) if metrics else None
+    result['video_limits']={'batch':BATCH_VIDEOS,'total':TASK_VIDEOS}
+    result['unknown_requests']=usage['unknown']  # retry requires acknowledgement while > 0
     result['request_limits']={'output_tokens':cfg['output_tokens'],'context_budget':cfg['context_budget']}
     return result
 
@@ -194,10 +196,10 @@ def add_links(tid:str,value:Links):
 class Selection(BaseModel): source_ids:list[str]=Field(min_length=1,max_length=15)
 @app.post('/api/tasks/{tid}/selection')
 def select_sources(tid:str,value:Selection):
-    task=editable(tid)
+    editable(tid)
     config=store.settings(); sources=store.sources(tid); selected=set(value.source_ids)
     if not selected <= {s['id'] for s in sources}: raise ValueError('包含不属于本任务的视频')
-    if len(selected)>min(5,config['max_videos']): raise ValueError('每批最多5个视频，并遵守设置中的更低数量限制')
+    if len(selected)>min(BATCH_VIDEOS,config['max_videos']): raise ValueError(f'每批最多{BATCH_VIDEOS}个视频，并遵守设置中的更低数量限制')
     durations=[s['meta'].get('duration') or 0 for s in sources if s['id'] in selected]
     if any(d<=0 or d>config['max_video_minutes']*60 for d in durations) or sum(durations)>config['max_minutes']*60: raise ValueError('视频时长未知或超过单条/总时长限制')
     with store.db() as c:
@@ -226,7 +228,7 @@ def retry(tid:str,value:Retry,req:Request):
         if operation:
             if operation['task_id']!=tid or operation['kind']!='retry': raise HTTPException(409,'请求标识已用于其他操作')
             return {'ok':True}
-    task=editable(tid)
+    editable(tid)
     with store.db() as c:
         c.execute('BEGIN IMMEDIATE')
         if c.execute('SELECT 1 FROM operations WHERE key=?',(key,)).fetchone(): return {'ok':True}
@@ -295,7 +297,6 @@ def get_guide(tid:str,version:int):
     if not row: raise KeyError()
     result={k:row[k] for k in row.keys() if k not in GUIDE_FIELDS}; result['prefs']=json.loads(result['prefs'])
     result['content']={k:json.loads(row[k]) for k in GUIDE_FIELDS if row[k] is not None}
-    from .guide import public_markdown
     body,separator,appendix=result['markdown'].partition('\n## GLM 质量审核')
     result['markdown']=public_markdown(body.rstrip())
     result['review_markdown']=('## GLM 质量审核'+appendix) if separator else ''

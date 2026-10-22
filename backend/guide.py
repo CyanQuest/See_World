@@ -3,10 +3,11 @@ import json
 import re
 from datetime import datetime
 from decimal import Decimal
-from . import store
+from . import editorial, store, writing
+from . import revision as revisions
 from .media import check
 from .providers import OUTPUT_LIMITS, llm_json
-from .security import InvalidOutput
+from .security import Cancelled, InvalidOutput
 
 PROMPT_VERSION = 'evidence-v1.1'
 CATEGORIES = ['景点','美食','住宿','交通','费用','预约','注意事项']
@@ -238,10 +239,9 @@ def generate(task_id, config, quality_pending=False, revision=None):
     sources=[s for s in store.sources(task_id) if s['selected'] and s['transcript']]
     all_facts=[]; usable=[]
     previous=None; decision=None; patch_result=None; allowed=None
-    from . import revision as revisions
     if revision:
         with store.db() as c: previous=json.loads(c.execute('SELECT content FROM guides WHERE task_id=? AND version=?',(task_id,revision)).fetchone()[0])
-        decision=__import__('backend.editorial',fromlist=['triage']).triage(task_id,revision,config)
+        decision=editorial.triage(task_id,revision,config)
         if not decision.get('search_complete'): raise InvalidOutput('已有证据检索尚未完成，不能修订或补视频')
         all_facts=revisions.revision_evidence(task_id,previous,decision)
         usable=[s for s in store.sources(task_id) if s['id'] in {f['source_id'] for f in all_facts}]
@@ -254,13 +254,10 @@ def generate(task_id, config, quality_pending=False, revision=None):
         if facts: all_facts.extend(facts); usable.append(source)
     if not all_facts: raise ValueError('所有来源均未提供可验证的旅行事实，请补充视频链接')
     store.set_status(task_id,'generating'); store.event(task_id,'生成攻略','正在编排每日行程并检查多来源差异')
-    from . import writing
-    from . import editorial
     context={'issues':[{k:v for k,v in i.items() if k!='evidence'} for i in decision['issues']], 'previous_directory':previous.get('editorial',{}).get('directory') if previous.get('editorial',{}).get('rules_version')==revisions.RULES else None, 'previous_route':previous.get('editorial',{}).get('route'),'allowed_days':sorted({d for i in decision['issues'] if i['kind']!='text' for d in i['days']})} if previous else None
     config=dict(config,output_tokens=min(config['output_tokens'],OUTPUT_LIMITS['撰写正文']))
     packet_config=dict(config,context_budget=config['context_budget']-len(store.dumps(context).encode())-min(12000,config['context_budget']//5))
     packet_config.pop('quality_feedback',None)
-    import hashlib
     input_key='写作资料:'+hashlib.sha256(store.dumps({'rules':revisions.RULES,'prompt':writing.PROMPT_PATH.read_text(),'revision':revision,'preferences':prefs,'facts':all_facts,'context':context,'feedback':config.get('quality_feedback')}).encode()).hexdigest()
     with store.db() as c: checkpoint=c.execute('SELECT value FROM editorial_steps WHERE task_id=? AND step_key=?',(task_id,input_key)).fetchone()
     if checkpoint:
@@ -350,7 +347,6 @@ def generate(task_id, config, quality_pending=False, revision=None):
         c.execute('BEGIN IMMEDIATE')
         current=c.execute('SELECT status FROM tasks WHERE id=?',(task_id,)).fetchone()
         if not current or current['status']=='cancelled':
-            from .security import Cancelled
             raise Cancelled()
         version=c.execute('SELECT COALESCE(MAX(version),0)+1 FROM guides WHERE task_id=?',(task_id,)).fetchone()[0]
         c.execute('INSERT INTO guides VALUES(?,?,?,?,?,?,?,?)',(task_id,version,store.dumps({'plan':plan,'writing':prose,'writing_input':packet,'writing_prompt':instruction,'facts':all_facts,'warnings':warnings,'source_ids':[s['id'] for s in usable],'editorial':route_info,'revision_of':revision,'revision_changes':changes,'revision_context':context,'revision_decision':decision,'revision_patch':patch_result,'block_hashes':{k:revisions.digest(v) for k,v in revisions.blocks(prose).items()}}),markdown,store.dumps(prefs),config['llm_model'],PROMPT_VERSION+'+'+writing.VERSION,store.now()))

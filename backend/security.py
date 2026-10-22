@@ -1,11 +1,12 @@
 import ipaddress
 import re
 import socket
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urljoin
 import httpx
 
 class Attention(Exception): pass
 class DeferredRetry(Attention): pass
+class UnknownOutcome(Attention): pass  # a paid request may have been billed
 class Cancelled(Exception): pass
 class InvalidOutput(Exception): pass
 
@@ -40,7 +41,6 @@ def get_public(value):
             public_url(value, media=True)
             response = client.get(value, headers={'Referer': 'https://www.bilibili.com/'})
             if response.is_redirect:
-                from urllib.parse import urljoin
                 value = urljoin(value, response.headers['location'])
                 continue
             response.raise_for_status()
