@@ -5,6 +5,7 @@ import json
 import re
 from pydantic import Field
 from . import store, editorial
+from .providers import OUTPUT_LIMITS
 from .security import InvalidOutput
 
 RULES='phase2-v1'
@@ -80,7 +81,7 @@ def search_existing(tid,issue,config,rows=None):
         with store.db() as c: c.execute('INSERT OR REPLACE INTO evidence_searches VALUES(?,?,?)',(tid,key,store.dumps(record)))
     save()
     # Every candidate is assessed in bounded batches; truncation is never absence.
-    limit=max(0,config['context_budget']-min(config['output_tokens'],1800)-len(store.dumps(issue).encode())-6500)
+    limit=max(0,config['context_budget']-min(config['output_tokens'],OUTPUT_LIMITS['证据判断'])-len(store.dumps(issue).encode())-6500)
     batches=[]; batch=[]; size=0
     for _,row in ranked:
         n=len(store.dumps(row).encode())
@@ -97,7 +98,7 @@ def search_existing(tid,issue,config,rows=None):
             if value['status']!='gap' and not value['hit_ids']: raise InvalidOutput('有依据的结论必须引用命中原文')
             if value['status']=='sufficient' and value['unresolved']: raise InvalidOutput('仍有未解决项不能判证据充分')
             return value
-        finding=editorial.structured(tid,f'证据判断:{key}:{index}',Finding,'针对单个问题判断这些原文能支持什么。status=sufficient/partial/gap。不要把关键词命中当支持，不从审核意见推断事实；必须核对起终点、整段与子段耗时、日期、同名归属与适用条件。别名不能证明同一地点。gap表示本批不能支持，程序会继续检查其他批次。',{'issue':issue,'preferences':store.task(tid)['prefs'],'candidates':batch},dict(config,output_tokens=min(config['output_tokens'],1800)),validate)
+        finding=editorial.structured(tid,f'证据判断:{key}:{index}',Finding,'针对单个问题判断这些原文能支持什么。status=sufficient/partial/gap。不要把关键词命中当支持，不从审核意见推断事实；必须核对起终点、整段与子段耗时、日期、同名归属与适用条件。别名不能证明同一地点。gap表示本批不能支持，程序会继续检查其他批次。',{'issue':issue,'preferences':store.task(tid)['prefs'],'candidates':batch},config,validate)
         record['findings'].append(finding); save()
     statuses={f['status'] for f in record['findings']}
     # Conflicting findings remain partial, never silently picked as conclusive.
@@ -118,7 +119,7 @@ def classify(tid,version,config):
             if issue['kind']!='text' and not issue['days']: raise InvalidOutput('路线问题必须说明受影响日期')
             if not issue['basis'] or not issue['action'] or not issue['impact']: raise InvalidOutput('问题缺少依据、动作或影响范围')
         return value
-    issues=editorial.structured(tid,'问题范围:'+key,Issues,'将审核必须修改项整理成问题，不纳入无需修改项。targets只用输入段落编号；文字text仅改目标段落，单日路线day，住宿或跨日移动cross_day须覆盖次日，全局硬需求冲突才global且说明理由。days列受影响日期，terms给地点、别名、起终点、类别关键词。basis引用具体审核原句；审核不是事实，include_arrival只管预算是否含往返费用，预算完整性不扣分。',{'blocks':known,'review':content['quality_review'],'preferences':prefs},dict(config,output_tokens=min(config['output_tokens'],3500)),validate)['issues']
+    issues=editorial.structured(tid,'问题范围:'+key,Issues,'将审核必须修改项整理成问题，不纳入无需修改项。targets只用输入段落编号；文字text仅改目标段落，单日路线day，住宿或跨日移动cross_day须覆盖次日，全局硬需求冲突才global且说明理由。days列受影响日期，terms给地点、别名、起终点、类别关键词。basis引用具体审核原句；审核不是事实，include_arrival只管预算是否含往返费用，预算完整性不扣分。',{'blocks':known,'review':content['quality_review'],'preferences':prefs},config,validate)['issues']
     rows=corpus(tid); records=[]
     for issue in issues:
         issue['issue_id']='I'+digest([version,issue])[:16]
@@ -223,4 +224,4 @@ def compare(tid,previous,candidate,decision,config):
         if not set(value['resolved']+value['unresolved'])<=issue_ids or set(value['resolved'])&set(value['unresolved']): raise InvalidOutput('复审问题编号错误')
         if set(value['resolved']+value['unresolved'])!=issue_ids: raise InvalidOutput('复审未覆盖全部问题')
         return value
-    return editorial.structured(tid,'退步检查:'+digest([RULES,previous['quality_review'],candidate['quality_review'],decision]),Comparison,'比较一次修订前后，resolved/unresolved必须覆盖输入问题编号。regressed列新关键问题、重现问题或破坏硬约束；审核互相矛盾不能确定时uncertain=true。无需重新评分，不挑高分；分数相同仍可明确解决问题。审核意见不是旅行事实；include_arrival仅控制预算，不表示禁用抵达日，预算完整性不评分。',{'issues':[{k:v for k,v in i.items() if k!='evidence'} for i in decision.get('issues',[])],'before_review':previous['quality_review'],'after_review':candidate['quality_review'],'before':{k:v for k,v in blocks(previous['writing']).items() if k in {t for i in decision.get('issues',[]) for t in i['targets']}},'after':{k:v for k,v in blocks(candidate['writing']).items() if k in {t for i in decision.get('issues',[]) for t in i['targets']}}},dict(config,output_tokens=min(config['output_tokens'],2200)),validate)
+    return editorial.structured(tid,'退步检查:'+digest([RULES,previous['quality_review'],candidate['quality_review'],decision]),Comparison,'比较一次修订前后，resolved/unresolved必须覆盖输入问题编号。regressed列新关键问题、重现问题或破坏硬约束；审核互相矛盾不能确定时uncertain=true。无需重新评分，不挑高分；分数相同仍可明确解决问题。审核意见不是旅行事实；include_arrival仅控制预算，不表示禁用抵达日，预算完整性不评分。',{'issues':[{k:v for k,v in i.items() if k!='evidence'} for i in decision.get('issues',[])],'before_review':previous['quality_review'],'after_review':candidate['quality_review'],'before':{k:v for k,v in blocks(previous['writing']).items() if k in {t for i in decision.get('issues',[]) for t in i['targets']}},'after':{k:v for k,v in blocks(candidate['writing']).items() if k in {t for i in decision.get('issues',[]) for t in i['targets']}}},config,validate)

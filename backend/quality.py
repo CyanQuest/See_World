@@ -63,11 +63,10 @@ def review(tid,version,config,standalone=False):
         if isinstance(value,dict): return {k:compact(v) for k,v in value.items() if not (k=='kind' and v=='fact')}
         return value
     data=compact(data)
-    cfg=dict(config,output_tokens=min(config['output_tokens'],2200))
     result=None
     for attempt in range(2):
         try:
-            result=validate_review(llm_json(cfg,tid,prompt,data)); break
+            result=validate_review(llm_json(config,tid,prompt,data,'审核攻略')); break
         except InvalidOutput as exc:
             if attempt: raise
             prompt+='\n上次检查错误：'+str(exc)+'。请严格返回五项整数分数及三个字符串数组；文字中的引语请用中文引号「」避免未转义双引号。'

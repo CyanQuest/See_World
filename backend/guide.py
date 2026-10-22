@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from . import store
 from .media import check
-from .providers import llm_json
+from .providers import OUTPUT_LIMITS, llm_json
 from .security import InvalidOutput
 
 PROMPT_VERSION = 'evidence-v1.1'
@@ -102,7 +102,7 @@ def extract(source, task_id, config):
         error = ''
         for attempt in range(2):
             try:
-                obj = llm_json(config,task_id,instruction + (' 上次错误：'+error+'，请修复。' if attempt else ''), {'destination':store.task(task_id)['prefs']['destination'],'source_id':source['id'],**{k:v for k,v in seg.items() if k!='text'}})
+                obj = llm_json(config,task_id,instruction + (' 上次错误：'+error+'，请修复。' if attempt else ''), {'destination':store.task(task_id)['prefs']['destination'],'source_id':source['id'],**{k:v for k,v in seg.items() if k!='text'}},'提取事实')
                 rows=obj.get('facts')
                 if not isinstance(rows,list) or len(rows)>50: raise InvalidOutput('事实结构错误')
                 found=[]; rejected=[]
@@ -257,7 +257,7 @@ def generate(task_id, config, quality_pending=False, revision=None):
     from . import writing
     from . import editorial
     context={'issues':[{k:v for k,v in i.items() if k!='evidence'} for i in decision['issues']], 'previous_directory':previous.get('editorial',{}).get('directory') if previous.get('editorial',{}).get('rules_version')==revisions.RULES else None, 'previous_route':previous.get('editorial',{}).get('route'),'allowed_days':sorted({d for i in decision['issues'] if i['kind']!='text' for d in i['days']})} if previous else None
-    config=dict(config,output_tokens=min(config['output_tokens'],8000))
+    config=dict(config,output_tokens=min(config['output_tokens'],OUTPUT_LIMITS['撰写正文']))
     packet_config=dict(config,context_budget=config['context_budget']-len(store.dumps(context).encode())-min(12000,config['context_budget']//5))
     packet_config.pop('quality_feedback',None)
     import hashlib
@@ -304,7 +304,7 @@ def generate(task_id, config, quality_pending=False, revision=None):
                 updated,patch_result,allowed=revisions.revise_prose(task_id,previous,packet,decision,config)
                 result={'writing':updated}
             else:
-                result=llm_json(config,task_id,instruction+(' 上次检查错误：'+error if attempt else ''),packet)
+                result=llm_json(config,task_id,instruction+(' 上次检查错误：'+error if attempt else ''),packet,'撰写正文')
             result=writing.normalize_reference_prefixes(result,packet)
             plan=validate_plan(writing.plan_from_writing(result,packet,prefs['days']),minimal,prefs['days'],prefs)
             validated=writing.validate_writing(result,packet,plan,defer_numeric_review=quality_pending)
@@ -318,7 +318,7 @@ def generate(task_id, config, quality_pending=False, revision=None):
             def check_body(value):
                 if not value['valid'] or value['issues']: raise InvalidOutput('正文越过路线约束：'+'；'.join(value['issues']))
                 return value
-            editorial.structured(task_id,'正文路线核对:'+revisions.digest([prose,route_info]),editorial.Gate,'独立核对正文是否新增核心地点、改变先后顺序/住宿终点/跨日移动，或只写风险提醒仍保留不成立的必要路段。逐段对照路线节点与原文，不能相信自报未改路线。包含概览及主题章节；推荐备选不等于核心行程，但不能暗中改变路线。无法确定或必须整改则valid=false且写issues。核对交通完整线路与子段时长、窗口、重复路段取舍及条件分支实际删减。不推断没有原文支持的地理关系。',{'writing':prose,'route':route_info,'facts':packet['facts'],'preferences':prefs},dict(config,output_tokens=min(config['output_tokens'],2400)),check_body)
+            editorial.structured(task_id,'正文路线核对:'+revisions.digest([prose,route_info]),editorial.Gate,'独立核对正文是否新增核心地点、改变先后顺序/住宿终点/跨日移动，或只写风险提醒仍保留不成立的必要路段。逐段对照路线节点与原文，不能相信自报未改路线。包含概览及主题章节；推荐备选不等于核心行程，但不能暗中改变路线。无法确定或必须整改则valid=false且写issues。核对交通完整线路与子段时长、窗口、重复路段取舍及条件分支实际删减。不推断没有原文支持的地理关系。',{'writing':prose,'route':route_info,'facts':packet['facts'],'preferences':prefs},config,check_body)
             with store.db() as c: c.execute('INSERT INTO editorial_steps VALUES(?,?,?)',(task_id,writer_key,store.dumps({'plan':plan,'prose':prose,'patch':patch_result,'allowed':sorted(allowed) if allowed is not None else None})))
             break
         except InvalidOutput as exc:

@@ -82,7 +82,7 @@ def test_search_finds_raw_not_in_previous_packet_and_resumes(monkeypatch,task_id
     add_raw(task_id,'未整理原文：甲城至乙城大巴全程约两小时。')
     calls=[]
     def model(*args):
-        candidates=args[-1]['candidates']; calls.append(1)
+        candidates=args[3]['candidates']; calls.append(1)
         return {'status':'sufficient','hit_ids':[candidates[0]['hit_id']],'conclusion':'原文支持全程时长','limitations':'视频时点','unresolved':''}
     monkeypatch.setattr(editorial,'llm_json',model)
     result=revision.search_existing(task_id,issue(),Settings().model_dump())

@@ -178,12 +178,32 @@ def test_paid_result_cache(monkeypatch,task_id):
     for _ in range(2): assert providers.request(cfg(),task_id,'llm','test',payload={'max_tokens':20})==response
     assert http.post.call_count==1
 
+def test_reservation_estimates_tokens_not_bytes(monkeypatch,task_id):
+    assert providers.estimate_tokens('长'*300)==300 and providers.estimate_tokens('a'*10)==4
+    fake_http(monkeypatch,[httpx.Response(200,json={'choices':[{'message':{'content':'ok'}}]})])
+    payload={'messages':[{'role':'user','content':'长'*3000}],'max_tokens':20}
+    providers.request(cfg(),task_id,'llm','撰写正文',payload=payload)
+    raw=json.dumps(payload,ensure_ascii=False)
+    with store.db() as c: reserved=c.execute('SELECT reserved_tokens FROM usage').fetchone()[0]
+    assert reserved==providers.estimate_tokens(raw)+20 and reserved<len(raw.encode())/2
+
+@pytest.mark.parametrize('setting,expected',[(16384,4096),(2000,2000)])
+def test_llm_json_records_stage_and_caps_output(monkeypatch,task_id,setting,expected):
+    sent=[]
+    def fake(config,tid,provider,operation,payload=None,**kw):
+        sent.append((operation,payload['max_tokens'])); return {'choices':[{'message':{'content':'{"facts":[]}'}}]}
+    monkeypatch.setattr(providers,'request',fake)
+    providers.llm_json(dict(cfg(),output_tokens=setting,context_budget=30000),task_id,'提取',{},'提取事实')
+    assert sent==[('提取事实',expected)]
+    with store.db() as c: metrics=json.loads(c.execute('SELECT value FROM request_metrics WHERE task_id=?',(task_id,)).fetchone()[0])
+    assert metrics['stage']=='提取事实' and metrics['output_limit']==expected
+
 def test_full_mock_guide_versions_exports(monkeypatch,client,task_id):
     from backend import editorial
     monkeypatch.setattr(editorial,'route',lambda tid,packet,*a:{'directory':{'places':[]},'route':{'days':[{'day':d,'activities':[],'legs':[]} for d in range(1,packet['preferences']['days']+1)]},'route_check':{'valid':True}})
     monkeypatch.setattr(editorial,'llm_json',lambda *a:{'valid':True,'issues':[],'evidence_gaps':[]})
     source=seed(task_id); raw=source['transcript']['text']; counts={'extraction':0,'plan':0}
-    def fake_llm(config,tid,instruction,data):
+    def fake_llm(config,tid,instruction,data,stage):
         if '提取目的地' in instruction:
             counts['extraction']+=1
             return {'facts':[{'category':'景点','entity_name':'人民公园','claim':'成都人民公园可以喝茶','evidence_excerpt':'成都人民公园可以喝茶','evidence_id':'P1'}]}
@@ -321,7 +341,7 @@ def test_worker_full_destination_flow_mock(monkeypatch,task_id):
     monkeypatch.setattr(media,'search',lambda *a:[URL,URL])
     monkeypatch.setattr(media,'metadata',lambda *a:(sample['meta'],{}))
     monkeypatch.setattr(media,'subtitle',lambda *a:sample['transcript'])
-    def llm(config,tid,instruction,data):
+    def llm(config,tid,instruction,data,stage):
         if '提取目的地' in instruction: return {'facts':[{'category':'景点','entity_name':'人民公园','claim':'成都人民公园可以喝茶','evidence_excerpt':'成都人民公园可以喝茶','evidence_id':'P1'}]}
         return authored_result({'days':[{'day':i+1,'上午':[data['facts'][0]['fact_id']] if i==0 else [],'下午':[],'晚上':[]} for i in range(data['preferences']['days'])],'conflicts':[]},data['facts'])
     monkeypatch.setattr(guide,'llm_json',llm)
@@ -576,7 +596,7 @@ def test_quality_expands_five_and_stops(monkeypatch,task_id,pass_round,expected)
         with store.db() as c:
             c.execute('INSERT INTO guides VALUES(?,?,?,?,?,?,?,?)',(tid,v,store.dumps(content),'draft',store.dumps(store.task(tid)['prefs']),'same-glm','test',store.now()))
             c.execute("UPDATE quality_cycles SET phase='review',version=? WHERE task_id=?",(v,tid))
-    def llm(config,tid,prompt,data):
+    def llm(config,tid,prompt,data,stage):
         scores=quality.WEIGHTS.copy()
         if len(rounds)<pass_round: scores['可执行性']=0
         return dict(scores=scores,critical_issues=[],issues=['需要补充交通资料'],missing_topics=['交通'])
@@ -679,7 +699,7 @@ def test_llm_structured_output_parameter(monkeypatch,base,structured):
         sent.append(kw['payload'])
         return {'choices':[{'message':{'content':'{"issues":["正文含\\"引语\\""]}'}}]}
     monkeypatch.setattr(providers,'request',fake)
-    result=providers.llm_json(dict(cfg(),llm_base=base),None,'返回 JSON',{})
+    result=providers.llm_json(dict(cfg(),llm_base=base),None,'返回 JSON',{},'审核攻略')
     assert result['issues']==['正文含"引语"']
     assert (sent[0].get('response_format')=={'type':'json_object'})==structured
 
@@ -724,7 +744,7 @@ def test_completed_writing_checkpoint_survives_before_version_commit(monkeypatch
     monkeypatch.setattr(editorial,'route',lambda tid,packet,*a:{'directory':{'places':[]},'route':{'days':[{'day':d,'activities':[],'legs':[]} for d in range(1,packet['preferences']['days']+1)]},'route_check':{'valid':True}})
     monkeypatch.setattr(editorial,'llm_json',lambda *a:{'valid':True,'issues':[],'evidence_gaps':[]})
     calls=[]
-    def llm(config,tid,instruction,data):
+    def llm(config,tid,instruction,data,stage):
         calls.append('extract' if '提取目的地' in instruction else 'write')
         if '提取目的地' in instruction:
             return {'facts':[{'category':'景点','entity_name':'人民公园','claim':'成都人民公园可以喝茶','evidence_excerpt':'成都人民公园可以喝茶','evidence_id':'P1'}]}

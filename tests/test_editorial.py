@@ -62,7 +62,7 @@ def test_review_hash_matches_export(client,monkeypatch,task_id):
     saved(task_id)
     captured=[]
     def llm(*args):
-        captured.append(args[-1]['markdown'])
+        captured.append(args[3]['markdown'])
         return dict(scores=quality.WEIGHTS,critical_issues=[],issues=[],missing_topics=[])
     monkeypatch.setattr(quality,'llm_json',llm)
     result=quality.review(task_id,1,Settings().model_dump())
@@ -95,7 +95,7 @@ def test_schema_retry_bounded_and_then_resume_cached(monkeypatch,task_id):
 
 def test_route_cannot_promote_unknown_place(monkeypatch,task_id):
     packet={'facts':[{'fact_id':'F1'}],'preferences':{'days':1}}
-    def llm(cfg,tid,instruction,data):
+    def llm(cfg,tid,instruction,data,stage):
         if '建立地点目录' in instruction:
             return {'places':[{'place_id':'P1','name':'同名公园','aliases':[],'region':'','category':'景点','fact_ids':['F1'],'confirmed':False,'conflict':'归属不明'}]}
         return {'days':[{'day':1,'start':'待定','end':'待定','activities':[{'place_id':'P1','duration':'建议1小时','optional':False}],'legs':[],'meals_rest_checkin':'午餐休息入住','buffer':'20%','cut_order':'删可选','contingencies':'雨天留在住处'}],'rationale':'建议','evidence_gaps':[]}
@@ -116,7 +116,7 @@ def test_no_improvement_prevents_more_rewrites(monkeypatch,task_id):
 def test_request_metrics_show_block_before_payment(task_id):
     from backend import providers
     with pytest.raises(InvalidOutput,match='上下文'):
-        providers.llm_json(Settings(llm_model='glm').model_dump(),task_id,'x',{'text':'长'*30000})
+        providers.llm_json(Settings(llm_model='glm').model_dump(),task_id,'x',{'text':'长'*30000},'提取事实')
     with store.db() as c:
         metrics=json.loads(c.execute('SELECT value FROM request_metrics WHERE task_id=?',(task_id,)).fetchone()[0])
         assert metrics['blocked'] and metrics['context_used']>metrics['context_limit']
@@ -148,3 +148,21 @@ def test_export_hash_includes_canonical_source_whitespace(client,monkeypatch,tas
     text=client.get(f'/api/tasks/{task_id}/export').text
     assert hashlib.sha256(text.encode()).hexdigest()==result['body_sha256']
     assert client.get(f'/api/tasks/{task_id}/guides/1').json()['markdown']==text
+
+
+def test_editorial_stage_name_drops_attempt_number(monkeypatch,task_id):
+    stages=[]
+    monkeypatch.setattr(editorial,'llm_json',lambda *a:stages.append(a[4]) or {'valid':True,'issues':[],'evidence_gaps':[]})
+    editorial.structured(task_id,'路线检查1:seed',editorial.Gate,'test',{},Settings().model_dump())
+    assert stages==['路线检查']
+
+
+def test_every_model_stage_has_output_limit():
+    import re
+    from pathlib import Path
+    from backend import providers
+    source=''.join(p.read_text() for p in Path(providers.__file__).parent.glob('*.py'))
+    used=set(re.findall(r"(?:structured|cached_step)\((?:tid|task_id),f?'([^':{]+)",source))
+    used|=set(re.findall(r"llm_json\([^\n]*,'([^']+)'\)",source))
+    # Every stage named in code has a cap, and the table has no unused names.
+    assert used==set(providers.OUTPUT_LIMITS)
