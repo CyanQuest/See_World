@@ -170,3 +170,36 @@ def test_route_draft_errors_name_day_and_empty_fields(monkeypatch,task_id):
         return {'days':[{'day':1,'start':'P1','end':'P1','activities':[],'legs':[],'meals_rest_checkin':'午餐','buffer':' ','cut_order':'删可选','contingencies':'雨天休息'}],'rationale':'建议','evidence_gaps':[]}
     monkeypatch.setattr(editorial,'llm_json',llm)
     with pytest.raises(InvalidOutput,match='第1天.*buffer'): editorial.route(task_id,packet,Settings().model_dump())
+
+
+def test_route_reports_every_problem_in_one_error():
+    route,directory,packet=sample_route()
+    route['days'][0]['activities']=[{'place_id':'B','optional':False,'duration':'1h'}]  # A→B→A, no legs
+    route['days'][1]['start']='C'; route['days'][1]['end']='C'                          # cross-day break, C→A→C, no legs
+    with pytest.raises(InvalidOutput) as error: editorial.validate_route(route,directory,packet)
+    message=str(error.value)
+    assert message.startswith('共 5 处问题，请一次全部修正：')
+    for part in ('第1天 A→B','第1天 B→A','跨日断裂：第1天终点 A','第2天 C→A','第2天 A→C'): assert part in message
+
+
+def test_route_problem_list_is_capped_at_twenty():
+    route,directory,packet=sample_route()
+    directory['places']+=[{'place_id':f'P{i}','name':f'P{i}','confirmed':True} for i in range(25)]
+    route['days'][0]['activities']=[{'place_id':f'P{i}','optional':False,'duration':'1h'} for i in range(25)]  # 26 distinct missing legs
+    with pytest.raises(InvalidOutput) as error: editorial.validate_route(route,directory,packet)
+    message=str(error.value)
+    assert message.startswith('共 26 处问题') and '20. ' in message and '21. ' not in message and '另有 6 处未列出' in message
+
+
+def test_route_draft_combines_draft_and_structure_problems_and_states_adjacency_rule(monkeypatch,task_id):
+    packet={'facts':[{'fact_id':'F1'}],'preferences':{'days':1}}
+    prompts=[]
+    def llm(cfg,tid,instruction,data,stage):
+        if stage=='地点整理': return {'places':[{'place_id':p,'name':p,'aliases':[],'region':'成都','category':'景点','fact_ids':['F1'],'confirmed':True,'conflict':''} for p in ('P1','P2')]}
+        prompts.append(instruction)
+        return {'days':[{'day':1,'start':'P1','end':'P1','activities':[{'place_id':'P2','duration':'1h','optional':False}],'legs':[],'meals_rest_checkin':'午餐','buffer':' ','cut_order':'删可选','contingencies':'雨天休息'}],'rationale':'建议','evidence_gaps':[]}
+    monkeypatch.setattr(editorial,'llm_json',llm)
+    with pytest.raises(InvalidOutput) as error: editorial.route(task_id,packet,Settings().model_dump())
+    message=str(error.value)
+    assert '共 3 处问题' in message and 'buffer' in message and '第1天 P1→P2' in message and '第1天 P2→P1' in message
+    assert '相邻两点' in prompts[0] and '共 3 处问题' in prompts[1]  # the retry sees every problem
