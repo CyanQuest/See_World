@@ -131,3 +131,42 @@ def test_cache_invalidates_changed_evidence_or_prompt(monkeypatch,task_id):
     for prompt,data in [('p',{'a':1}),('p',{'a':1}),('new',{'a':1}),('new',{'a':2})]:
         editorial.structured(task_id,'gate',editorial.Gate,prompt,data,Settings().model_dump())
     assert len(calls)==3
+
+
+def test_program_owns_node_ids_and_updates_branch_references():
+    route,directory,packet=sample_route()
+    day1,day2=route['days']
+    day1['activities']=[{'place_id':'A','optional':False,'duration':'1h','node_id':'D1N1'},{'place_id':'B','optional':True,'duration':'1h','node_id':'D1-A1'}]
+    day1['legs']=[{'start':'A','end':'B','fact_ids':[],'node_id':'leg_x','time_kind':'unknown','minutes':None}]
+    day1['branches']=[{'branch_id':'rain','condition':'下雨','drop_node_ids':['D1N1','leg_x'],'end':'A','next_start':'A','next_day_action':'次日照常'}]
+    day2['activities'][0]['node_id']='D1-A3'  # another day's ID copied into day 2
+    editorial.validate_route(route,directory,packet)
+    assert [a['node_id'] for a in day1['activities']]==['D1-A2','D1-A1']  # valid ID kept, invented one gets a free number
+    assert day1['legs'][0]['node_id']=='D1-L1' and day2['activities'][0]['node_id']=='D2-A1'
+    assert day1['branches'][0]['drop_node_ids']==['D1-A2','D1-L1']
+
+
+def test_duplicate_valid_node_id_is_rejected_with_its_location():
+    route,directory,packet=sample_route()
+    route['days'][0]['activities']=[{'place_id':'A','optional':False,'duration':'1h','node_id':'D1-A1'},{'place_id':'B','optional':True,'duration':'1h','node_id':'D1-A1'}]
+    with pytest.raises(InvalidOutput,match='第1天.*D1-A1'): editorial.validate_route(route,directory,packet)
+
+
+def test_route_errors_name_day_node_and_expected_value():
+    route,directory,packet=sample_route()
+    leg={'start':'A','end':'B','fact_ids':['F1'],'time_kind':'source','minutes':30,'evidence_start':'A','evidence_end':'C','time_context':'A到B需要30分钟'}
+    route['days'][0]['legs']=[leg]
+    with pytest.raises(InvalidOutput,match='起终点不匹配：第1天交通 D1-L1.*A→B.*A→C'): editorial.validate_route(route,directory,packet)
+    leg.update(evidence_end='B',time_kind='unknown')
+    with pytest.raises(InvalidOutput,match='精确分钟：第1天交通 D1-L1.*30'): editorial.validate_route(route,directory,packet)
+    route,directory,packet=sample_route(); route['days'][1]['start']='B'
+    with pytest.raises(InvalidOutput,match='跨日断裂：第1天终点 A.*第2天起点 B'): editorial.validate_route(route,directory,packet)
+
+
+def test_route_draft_errors_name_day_and_empty_fields(monkeypatch,task_id):
+    packet={'facts':[{'fact_id':'F1'}],'preferences':{'days':1}}
+    def llm(cfg,tid,instruction,data,stage):
+        if stage=='地点整理': return {'places':[{'place_id':'P1','name':'公园','aliases':[],'region':'成都','category':'景点','fact_ids':['F1'],'confirmed':True,'conflict':''}]}
+        return {'days':[{'day':1,'start':'P1','end':'P1','activities':[],'legs':[],'meals_rest_checkin':'午餐','buffer':' ','cut_order':'删可选','contingencies':'雨天休息'}],'rationale':'建议','evidence_gaps':[]}
+    monkeypatch.setattr(editorial,'llm_json',llm)
+    with pytest.raises(InvalidOutput,match='第1天.*buffer'): editorial.route(task_id,packet,Settings().model_dump())

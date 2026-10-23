@@ -1,5 +1,6 @@
 """Persisted evidence organization, route gate and editorial revision checkpoints."""
 import hashlib
+import itertools
 import json
 import re
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -132,15 +133,19 @@ def route(tid, packet, config, context=None):
     directory=(context or {}).get('previous_directory') or structured(tid,'地点整理:'+directory_seed,Directory,'按原文建立地点目录，保留标准名、别名、所属城市或片区、类别及支持这些属性的事实编号。不能从视频标题推定归属。没有原文归属依据就 confirmed=false。同名不同区域不得合并，大范围目的地区分城市。只收录实际地点。',packet,config,directory_check)
     places={p['place_id']:p for p in directory['places']}
     def route_check(r):
-        if len(r['days'])!=packet['preferences']['days']: raise InvalidOutput('路线草案天数错误')
+        expected_days=packet['preferences']['days']
+        if len(r['days'])!=expected_days: raise InvalidOutput(f'路线草案天数错误：应为 {expected_days} 天，实际 {len(r["days"])} 天')
         for i,d in enumerate(r['days'],1):
-            if d['day']!=i or any(not d[k].strip() for k in ('start','end','meals_rest_checkin','buffer','cut_order','contingencies')): raise InvalidOutput('路线草案缺少起终点、休息机动或应变')
-            for a in d['activities']:
-                if a['place_id'] not in places or not a['duration']: raise InvalidOutput('路线活动引用未知地点或缺少停留建议')
-                if not a['optional'] and not places[a['place_id']]['confirmed']: raise InvalidOutput('核心路线使用归属未确认地点：'+a['place_id']+' '+places[a['place_id']]['name']+'；请移除或设 optional=true，不得修改目录确认状态')
-            for leg in d['legs']:
-                if not set(leg['fact_ids'])<=known: raise InvalidOutput('交通引用不属于本轮证据：'+','.join(sorted(set(leg['fact_ids'])-known))+'；只可引用 evidence.facts 的编号')
-                if (not leg['fact_ids'] or leg['missing']) and not leg['fallback']: raise InvalidOutput('交通缺证据且无缩减或条件方案')
+            if d['day']!=i: raise InvalidOutput(f'路线草案日期顺序错误：第 {i} 项的 day 应为 {i}，实际为 {d["day"]}')
+            empty=[k for k in ('start','end','meals_rest_checkin','buffer','cut_order','contingencies') if not d[k].strip()]
+            if empty: raise InvalidOutput(f'路线草案缺少起终点、休息机动或应变：第{i}天 {"、".join(empty)} 为空')
+            for pos,a in enumerate(d['activities'],1):
+                if a['place_id'] not in places: raise InvalidOutput(f'路线活动引用未知地点或缺少停留建议：第{i}天第{pos}个活动的 place_id {a["place_id"]} 不在地点目录中')
+                if not a['duration']: raise InvalidOutput(f'路线活动引用未知地点或缺少停留建议：第{i}天第{pos}个活动 {a["place_id"]} 缺少 duration')
+                if not a['optional'] and not places[a['place_id']]['confirmed']: raise InvalidOutput(f'核心路线使用归属未确认地点：第{i}天 '+a['place_id']+' '+places[a['place_id']]['name']+'；请移除或设 optional=true，不得修改目录确认状态')
+            for pos,leg in enumerate(d['legs'],1):
+                if not set(leg['fact_ids'])<=known: raise InvalidOutput(f'交通引用不属于本轮证据：第{i}天第{pos}段交通 {leg["start"]}→{leg["end"]} 引用了 '+','.join(sorted(set(leg['fact_ids'])-known))+'；只可引用 evidence.facts 的编号')
+                if (not leg['fact_ids'] or leg['missing']) and not leg['fallback']: raise InvalidOutput(f'交通缺证据且无缩减或条件方案：第{i}天第{pos}段交通 {leg["start"]}→{leg["end"]} 需要填写 fallback')
         r=validate_route(r,directory,packet)
         if context and context.get('previous_route'):
             old=context['previous_route']
@@ -163,52 +168,81 @@ def route(tid, packet, config, context=None):
         draft=structured(tid,f'路线调整{attempt+1}:'+seed,Route,instruction+'\n根据检查意见调整不成立的路线，再输出完整草案。',dict(data,route=draft,route_check=gate),config,route_check)
 
 
+def assign_node_ids(index, day):
+    """The program owns node IDs. Keep IDs already in this day's D{n}-A{k}/D{n}-L{k}
+    form (stable across revisions); replace model-made ones with free numbers and
+    point branch references at the replacements."""
+    renamed={}
+    for kind,items in (('A',day['activities']),('L',day['legs'])):
+        pattern=rf'D{index}-{kind}[1-9][0-9]*'
+        taken={item['node_id'] for item in items if re.fullmatch(pattern,item.get('node_id') or '')}
+        free=(f'D{index}-{kind}{n}' for n in itertools.count(1) if f'D{index}-{kind}{n}' not in taken)
+        for item in items:
+            old=item.get('node_id') or ''
+            if not re.fullmatch(pattern,old):
+                item['node_id']=next(free)
+                if old: renamed[old]=item['node_id']
+    for branch in day.get('branches',[]):
+        branch['drop_node_ids']=[renamed.get(n,n) for n in branch['drop_node_ids']]
+
+
 def validate_route(route, directory, packet):
+    # Messages name the day, node and expected value: the model's one retry sees them.
     places={p['place_id']:p for p in directory['places']}
     facts={f['fact_id']:f for f in packet['facts']}
     days=route['days']
-    if len(days)!=packet['preferences']['days']: raise InvalidOutput('路线天数错误')
+    expected_days=packet['preferences']['days']
+    if len(days)!=expected_days: raise InvalidOutput(f'路线天数错误：应为 {expected_days} 天，实际 {len(days)} 天')
     nodes=set()
-    def confirmed(pid):
+    def confirmed(pid,where):
         if pid not in places or not places[pid]['confirmed']:
-            raise InvalidOutput('路线起终点或必要移动使用未确认地点：'+pid)
+            raise InvalidOutput(f'路线起终点或必要移动使用未确认地点：{where} {pid}；只能使用目录中 confirmed=true 的 place_id')
     for index,day in enumerate(days,1):
-        if day['day']!=index: raise InvalidOutput('路线日期顺序错误')
-        confirmed(day['start']); confirmed(day['end'])
-        if index>1 and days[index-2]['end']!=day['start']: raise InvalidOutput('跨日断裂：前晚终点与次日起点不一致')
-        for pid in day.get('accepted_starts',[]): confirmed(pid)
+        if day['day']!=index: raise InvalidOutput(f'路线日期顺序错误：第 {index} 项的 day 应为 {index}，实际为 {day["day"]}')
+        confirmed(day['start'],f'第{index}天起点'); confirmed(day['end'],f'第{index}天终点')
+        if index>1 and days[index-2]['end']!=day['start']: raise InvalidOutput(f'跨日断裂：第{index-1}天终点 {days[index-2]["end"]} 与第{index}天起点 {day["start"]} 应相同')
+        for pid in day.get('accepted_starts',[]): confirmed(pid,f'第{index}天 accepted_starts')
+        assign_node_ids(index,day)
         for kind,items in [('A',day['activities']),('L',day['legs'])]:
-            for pos,item in enumerate(items,1):
-                # IDs are assigned by the program and remain stable for unchanged nodes.
-                item['node_id']=item.get('node_id') or f'D{index}-{kind}{pos}'
-                if item['node_id'] in nodes or not re.fullmatch(rf'D{index}-{kind}[1-9][0-9]*',item['node_id']): raise InvalidOutput('路线节点编号重复或跨日')
-                nodes.add(item['node_id'])
+            for item in items:
+                node=item['node_id']
+                if node in nodes: raise InvalidOutput(f'路线节点编号重复：第{index}天 {node} 出现多次；每个编号只能用一次，新节点可留空由程序编号')
+                nodes.add(node)
                 if kind=='A':
-                    if item['place_id'] not in places: raise InvalidOutput('未知活动地点')
-                    if not item['optional']: confirmed(item['place_id'])
+                    if item['place_id'] not in places: raise InvalidOutput(f'未知活动地点：第{index}天活动 {node} 的 place_id {item["place_id"]} 不在地点目录中')
+                    if not item['optional']: confirmed(item['place_id'],f'第{index}天核心活动 {node}')
                 else:
-                    confirmed(item['start']); confirmed(item['end'])
-                    if not set(item['fact_ids'])<=facts.keys(): raise InvalidOutput('未知交通引用')
-                    if item.get('time_kind','unknown') not in ('unknown','planning','source'): raise InvalidOutput('未知耗时类别')
+                    leg=f'第{index}天交通 {node}'
+                    confirmed(item['start'],leg+' 起点'); confirmed(item['end'],leg+' 终点')
+                    unknown=sorted(set(item['fact_ids'])-facts.keys())
+                    if unknown: raise InvalidOutput(f'未知交通引用：{leg} 引用了本轮证据之外的事实 {",".join(unknown)}')
+                    time_kind=item.get('time_kind','unknown')
+                    if time_kind not in ('unknown','planning','source'): raise InvalidOutput(f'未知耗时类别：{leg} 的 time_kind 应为 source/planning/unknown，实际为 {time_kind}')
                     minutes=item.get('minutes')
-                    if minutes is not None and (type(minutes)!=int or minutes<0): raise InvalidOutput('耗时错误')
-                    if item.get('time_kind','unknown')=='unknown' and minutes is not None: raise InvalidOutput('未知耗时不能填精确分钟')
-                    if item.get('time_kind')=='source':
-                        if minutes is None or not item['fact_ids'] or item.get('evidence_start')!=item['start'] or item.get('evidence_end')!=item['end']: raise InvalidOutput('交通时长引用起终点不匹配')
+                    if minutes is not None and (type(minutes)!=int or minutes<0): raise InvalidOutput(f'耗时错误：{leg} 的 minutes 应为非负整数或 null，实际为 {minutes!r}')
+                    if time_kind=='unknown' and minutes is not None: raise InvalidOutput(f'未知耗时不能填精确分钟：{leg} 的 time_kind=unknown，minutes 应为 null，实际为 {minutes}')
+                    if time_kind=='source':
+                        if minutes is None or not item['fact_ids']: raise InvalidOutput(f'交通时长引用起终点不匹配：{leg} 的 time_kind=source 必须填写 minutes 并引用 fact_ids；没有原文时长就改为 planning 或 unknown')
+                        if item.get('evidence_start')!=item['start'] or item.get('evidence_end')!=item['end']:
+                            raise InvalidOutput(f"交通时长引用起终点不匹配：{leg} 本段为 {item['start']}→{item['end']}，evidence_start/evidence_end 为 {item.get('evidence_start')}→{item.get('evidence_end')}，两者应相同；原文时长不属于本段就改为 planning 或 unknown")
                         excerpt=item.get('time_context','')
-                        if not excerpt or not any(excerpt in facts[f].get('evidence_excerpt','') for f in item['fact_ids']): raise InvalidOutput('交通时长语境不在引用原文')
+                        if not excerpt or not any(excerpt in facts[f].get('evidence_excerpt','') for f in item['fact_ids']): raise InvalidOutput(f'交通时长语境不在引用原文：{leg} 的 time_context 必须逐字摘自所引用事实 {",".join(item["fact_ids"])} 的原文')
         mandatory=[day['start']]+[a['place_id'] for a in day['activities'] if not a['optional']]+[day['end']]
         edges={(leg['start'],leg['end']) for leg in day['legs']}
         for start,end in zip(mandatory,mandatory[1:]):
-            if start!=end and (start,end) not in edges: raise InvalidOutput('核心活动缺少相邻交通路段')
+            if start!=end and (start,end) not in edges: raise InvalidOutput(f'核心活动缺少相邻交通路段：第{index}天 {start}→{end} 之间需要一段 start={start}、end={end} 的交通')
         window=day.get('window_minutes')
-        if window is not None and (window<=0 or sum(l.get('minutes') or 0 for l in day['legs'] if l.get('time_kind')=='source')>window): raise InvalidOutput('已知耗时超过时间窗口')
+        known_minutes=sum(l.get('minutes') or 0 for l in day['legs'] if l.get('time_kind')=='source')
+        if window is not None and (window<=0 or known_minutes>window): raise InvalidOutput(f'已知耗时超过时间窗口：第{index}天 window_minutes={window}，原文交通耗时合计 {known_minutes} 分钟')
         own={a['node_id'] for a in day['activities']}|{l['node_id'] for l in day['legs']}
         for branch in day.get('branches',[]):
-            confirmed(branch['end']); confirmed(branch['next_start'])
-            if not branch['condition'] or not branch['next_day_action'] or not branch['drop_node_ids'] or not set(branch['drop_node_ids'])<=own: raise InvalidOutput('备用方案必须实际删减本日节点并说明次日动作')
-            if branch['end']!=branch['next_start']: raise InvalidOutput('条件分支跨日断裂')
-            if index<len(days) and branch['next_start'] not in [days[index]['start'],*days[index].get('accepted_starts',[])]: raise InvalidOutput('次日未覆盖条件分支起点')
+            name=f"第{index}天备用方案 {branch.get('branch_id') or '未命名'}"
+            confirmed(branch['end'],name+' 终点'); confirmed(branch['next_start'],name+' 次日起点')
+            missing=[k for k in ('condition','next_day_action','drop_node_ids') if not branch[k]]
+            outside=sorted(set(branch['drop_node_ids'])-own)
+            if missing or outside: raise InvalidOutput(f'备用方案必须实际删减本日节点并说明次日动作：{name}'+(f' 缺少 {"、".join(missing)}' if missing else '')+(f' 删减了本日不存在的节点 {",".join(outside)}（本日节点：{",".join(sorted(own))}）' if outside else ''))
+            if branch['end']!=branch['next_start']: raise InvalidOutput(f'条件分支跨日断裂：{name} 的 end {branch["end"]} 与 next_start {branch["next_start"]} 应相同')
+            if index<len(days) and branch['next_start'] not in [days[index]['start'],*days[index].get('accepted_starts',[])]: raise InvalidOutput(f'次日未覆盖条件分支起点：{name} 的次日起点 {branch["next_start"]} 应是第{index+1}天 start 或 accepted_starts 之一')
     return route
 
 
